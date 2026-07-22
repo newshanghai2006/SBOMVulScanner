@@ -1,0 +1,118 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="SBOM 与 HBOM 已知漏洞匹配工作台">
+  <title>SBOM Scan</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand"><span class="brand-mark">S</span><span>SBOM Scan</span></div>
+    <div class="service-state"><span class="state-dot"></span>实时漏洞数据</div>
+  </header>
+
+  <main>
+    <section class="intro">
+      <p class="eyebrow">供应链安全工作台</p>
+      <h1>识别组件，定位已知风险</h1>
+      <p>上传标准 SBOM 或硬件 HBOM，依据 OSV 与 NVD 的当前数据完成可追溯匹配。</p>
+    </section>
+
+    <section class="history" id="historySection" hidden>
+      <div class="history-head"><div><p class="eyebrow">资产记录</p><h2>最近扫描</h2></div><span>结果保存在本机</span></div>
+      <div class="history-list" id="historyList"></div>
+    </section>
+
+    <section class="workspace" id="scanPanel">
+      <form id="scanForm">
+        <div class="form-head">
+          <div><span class="step">01</span><h2>选择清单</h2></div>
+          <div class="segmented" role="radiogroup" aria-label="文档类型">
+            <label><input type="radio" name="document_type" value="auto" checked><span>自动识别</span></label>
+            <label><input type="radio" name="document_type" value="cyclonedx"><span>CycloneDX</span></label>
+            <label><input type="radio" name="document_type" value="spdx"><span>SPDX</span></label>
+            <label><input type="radio" name="document_type" value="hbom"><span>HBOM</span></label>
+          </div>
+        </div>
+
+        <label class="dropzone" id="dropzone">
+          <input id="fileInput" name="file" type="file" accept=".json,application/json" required>
+          <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M12 16V4m0 0L7 9m5-5 5 5M5 15v4h14v-4"/></svg>
+          <strong id="fileTitle">拖放 JSON 文件到这里</strong>
+          <span id="fileMeta">或点击选择文件 · 最大 5 MB</span>
+        </label>
+
+        <details class="advanced">
+          <summary>
+            <span><span class="step">02</span>高级配置 <small>可选</small></span>
+            <svg viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></svg>
+          </summary>
+          <div class="advanced-grid">
+            <label>NVD API Key <span>提高 HBOM 查询速率</span><input type="password" name="nvd_api_key" autocomplete="off" placeholder="可留空"></label>
+            <label>LLM Base URL <span>OpenAI 兼容接口</span><input type="url" name="llm_base_url" placeholder="https://api.example.com/v1"></label>
+            <label>LLM API Key <span>仅本次请求使用</span><input type="password" name="llm_api_key" autocomplete="off" placeholder="可留空"></label>
+            <label>模型 <span>用于风险摘要</span><input type="text" name="llm_model" value="gpt-4.1-mini"></label>
+            <label>扫描引擎 <span>Trivy 可选</span><select name="scan_engine"><option value="auto">自动检测</option><option value="osv">仅 OSV / NVD</option><option value="hybrid">OSV / NVD + Trivy</option></select></label>
+            <label class="check-option"><input type="checkbox" name="scan_container_images" value="true"><span><strong>扫描容器镜像</strong><small>使用 Trivy 拉取并检查最多 5 个镜像</small></span></label>
+            <label class="check-option"><input type="checkbox" name="ai_summary_enabled" value="true"><span><strong>AI 处置摘要</strong><small>仅总结已确认的结构化漏洞结果</small></span></label>
+            <label class="check-option threat-toggle"><input type="checkbox" name="ai_threat_search" value="true"><span><strong>AI 新兴威胁搜索</strong><small>使用 Responses Web Search，结果均标记为未验证</small></span></label>
+            <label>最大搜索组件数 <span>1 - 20</span><input type="number" name="threat_max_components" value="10" min="1" max="20"></label>
+            <label>情报时间范围 <span>1 - 365 天</span><input type="number" name="threat_days" value="30" min="1" max="365"></label>
+          </div>
+          <p class="privacy">LLM 完全可选，不参与正式漏洞匹配。实时搜索会将所选组件名、版本和 purl 发送给模型服务；密钥不写入数据库或报告。</p>
+        </details>
+
+        <div class="action-row">
+          <p id="formHint">支持 CycloneDX 1.4+ JSON、SPDX 2.x JSON 和 HBOM JSON</p>
+          <button class="primary" id="scanButton" type="submit">
+            <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/></svg>
+            <span>开始扫描</span>
+          </button>
+        </div>
+      </form>
+      <div class="progress" id="progress" hidden><span></span></div>
+      <div class="error" id="error" role="alert" hidden></div>
+    </section>
+
+    <section class="results" id="results" hidden>
+      <div class="results-head">
+        <div><p class="eyebrow">扫描结果</p><h2 id="resultName">风险概览</h2><p id="scanTime"></p></div>
+        <a class="download" id="downloadReport" href="#" download>
+          <svg viewBox="0 0 24 24"><path d="M12 3v12m0 0 5-5m-5 5-5-5M5 20h14"/></svg>导出报告
+        </a>
+      </div>
+      <div class="metrics">
+        <div><span>组件总数</span><strong id="totalCount">0</strong></div>
+        <div class="danger"><span>风险组件</span><strong id="riskCount">0</strong></div>
+        <div><span>漏洞记录</span><strong id="vulnCount">0</strong></div>
+        <div><span>待确认</span><strong id="unknownCount">0</strong></div>
+        <div class="danger"><span>CISA KEV</span><strong id="kevCount">0</strong></div>
+        <div><span>已有修复版本</span><strong id="fixableCount">0</strong></div>
+        <div><span>Excluded 漏洞</span><strong id="excludedCount">0</strong></div>
+      </div>
+      <div class="scan-warnings" id="scanWarnings" hidden></div>
+      <div class="ai-summary" id="aiSummary" hidden><span>AI 风险摘要</span><p></p></div>
+      <div class="emerging" id="emergingThreats" hidden>
+        <div class="emerging-head"><div><span>新兴威胁情报</span><h3>需要人工复核</h3></div><b>不计入正式漏洞统计</b></div>
+        <div id="emergingList"></div>
+      </div>
+      <div class="list-toolbar">
+        <div class="filters" id="filters">
+          <button class="active" data-filter="all">全部</button>
+          <button data-filter="vulnerable">有风险</button>
+          <button data-filter="clean">未命中</button>
+          <button data-filter="unknown">待确认</button>
+          <button data-filter="excluded">Excluded</button>
+        </div>
+        <label class="search"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/></svg><input id="search" placeholder="搜索组件或 CVE"></label>
+      </div>
+      <div class="component-list" id="componentList"></div>
+      <div class="empty" id="empty" hidden>没有符合当前条件的组件</div>
+    </section>
+  </main>
+  <footer>数据来自 OSV 与 NVD · 扫描结果需结合厂商公告复核</footer>
+  <script src="/app.js"></script>
+</body>
+</html>

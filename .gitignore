@@ -1,0 +1,11 @@
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.idea/
+.vscode/
+data/
+server.*.log
+.bomlens-review/
+.osv-scanner-review/
+.dependency-track-review/

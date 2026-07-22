@@ -1,0 +1,22 @@
+{
+  "bomFormat": "HBOM",
+  "specVersion": "1.0",
+  "components": [
+    {
+      "type": "network-device",
+      "name": "Example Router",
+      "manufacturer": "Example Vendor",
+      "model": "XR-1000",
+      "firmwareVersion": "1.0.0",
+      "cpe": "cpe:2.3:h:example_vendor:xr-1000:*:*:*:*:*:*:*:*"
+    },
+    {
+      "type": "firmware",
+      "name": "Embedded Linux Firmware",
+      "manufacturer": "Example Vendor",
+      "firmwareVersion": "3.2.1",
+      "cpe": "cpe:2.3:o:example_vendor:embedded_linux:3.2.1:*:*:*:*:*:*:*"
+    }
+  ]
+}
+
