@@ -1,5 +1,5 @@
 from app import database
-from app.models import Component, ComponentResult, ScanResult
+from app.models import Component, ComponentResult, CustomAdvisory, ScanResult
 
 
 def test_scan_persistence(tmp_path, monkeypatch):
@@ -16,3 +16,13 @@ def test_scan_persistence(tmp_path, monkeypatch):
     assert database.list_scans()[0].document_hash == "abc"
     assert database.delete_scan("saved") is True
     assert database.get_scan("saved") is None
+
+    advisory = CustomAdvisory(
+        id="LOCAL-TEST", component_purl="pkg:maven/com.example/demo", exact_version="1.0",
+        title="Local advisory", source_url="https://security.example/advisory",
+        reason="Manually confirmed exact version", created_at="2026-01-01T00:00:00Z",
+    )
+    database.save_custom_advisory(advisory)
+    assert database.list_custom_advisories() == [advisory]
+    assert database.delete_custom_advisory("LOCAL-TEST") is True
+    assert database.list_custom_advisories() == []

@@ -1,9 +1,10 @@
 from __future__ import annotations
 
+import json
 import sqlite3
 from pathlib import Path
 
-from .models import ScanResult, ScanSummary
+from .models import CustomAdvisory, ScanResult, ScanSummary
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 DATA_DIR = BASE_DIR / "data"
@@ -39,6 +40,21 @@ def initialize() -> None:
         if "excluded_vulnerability_count" not in columns:
             connection.execute("ALTER TABLE scans ADD COLUMN excluded_vulnerability_count INTEGER NOT NULL DEFAULT 0")
         connection.execute("CREATE INDEX IF NOT EXISTS scans_scanned_at_idx ON scans(scanned_at DESC)")
+        connection.execute("""
+            CREATE TABLE IF NOT EXISTS custom_advisories (
+                id TEXT PRIMARY KEY,
+                component_purl TEXT NOT NULL,
+                exact_version TEXT NOT NULL,
+                title TEXT NOT NULL,
+                source_url TEXT NOT NULL,
+                identifiers_json TEXT NOT NULL DEFAULT '[]',
+                severity TEXT NOT NULL DEFAULT 'UNKNOWN',
+                reason TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                UNIQUE(component_purl, exact_version, source_url)
+            )
+        """)
+        connection.execute("CREATE INDEX IF NOT EXISTS custom_advisories_component_idx ON custom_advisories(component_purl, exact_version)")
 
 
 def save_scan(scan: ScanResult) -> None:
@@ -76,4 +92,34 @@ def list_scans(limit: int = 20) -> list[ScanSummary]:
 def delete_scan(scan_id: str) -> bool:
     with _connect() as connection:
         cursor = connection.execute("DELETE FROM scans WHERE scan_id = ?", (scan_id,))
+    return cursor.rowcount > 0
+
+
+def save_custom_advisory(advisory: CustomAdvisory) -> None:
+    with _connect() as connection:
+        connection.execute("""
+            INSERT INTO custom_advisories (
+                id, component_purl, exact_version, title, source_url,
+                identifiers_json, severity, reason, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (
+            advisory.id, advisory.component_purl, advisory.exact_version, advisory.title,
+            advisory.source_url, json.dumps(advisory.identifiers, ensure_ascii=False),
+            advisory.severity, advisory.reason, advisory.created_at,
+        ))
+
+
+def list_custom_advisories() -> list[CustomAdvisory]:
+    with _connect() as connection:
+        rows = connection.execute("SELECT * FROM custom_advisories ORDER BY created_at DESC").fetchall()
+    return [CustomAdvisory(
+        id=row["id"], component_purl=row["component_purl"], exact_version=row["exact_version"],
+        title=row["title"], source_url=row["source_url"], identifiers=json.loads(row["identifiers_json"]),
+        severity=row["severity"], reason=row["reason"], created_at=row["created_at"],
+    ) for row in rows]
+
+
+def delete_custom_advisory(advisory_id: str) -> bool:
+    with _connect() as connection:
+        cursor = connection.execute("DELETE FROM custom_advisories WHERE id = ?", (advisory_id,))
     return cursor.rowcount > 0

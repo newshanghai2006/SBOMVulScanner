@@ -46,6 +46,29 @@ class EmergingThreat(BaseModel):
     reason: str = Field(min_length=1, max_length=1000)
 
 
+class CustomAdvisoryCreate(BaseModel):
+    component_purl: str = Field(min_length=5, max_length=1000)
+    exact_version: str = Field(min_length=1, max_length=300)
+    title: str = Field(min_length=1, max_length=500)
+    source_url: str = Field(min_length=8, max_length=2000)
+    identifiers: list[str] = Field(default_factory=list, max_length=20)
+    severity: Literal["CRITICAL", "HIGH", "MEDIUM", "LOW", "UNKNOWN"] = "UNKNOWN"
+    reason: str = Field(min_length=1, max_length=1000)
+    confirmed: bool
+
+
+class CustomAdvisory(BaseModel):
+    id: str
+    component_purl: str
+    exact_version: str
+    title: str
+    source_url: str
+    identifiers: list[str] = Field(default_factory=list)
+    severity: Literal["CRITICAL", "HIGH", "MEDIUM", "LOW", "UNKNOWN"] = "UNKNOWN"
+    reason: str
+    created_at: str
+
+
 class ComponentResult(BaseModel):
     component: Component
     vulnerabilities: list[Vulnerability] = Field(default_factory=list)

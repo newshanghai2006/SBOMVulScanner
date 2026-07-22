@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+import sqlite3
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -13,7 +14,7 @@ from fastapi.responses import PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 
 from . import database
-from .models import ScanResult, ScanSummary
+from .models import CustomAdvisory, CustomAdvisoryCreate, ScanResult, ScanSummary, Vulnerability
 from .parsers import DocumentError, parse_document
 from .report import markdown_report
 from .scanner import SEVERITY_ORDER, enrich_risk, scan_components
@@ -24,7 +25,38 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 MAX_FILE_SIZE = 5 * 1024 * 1024
 
 database.initialize()
-app = FastAPI(title="SBOM Scan", version="2.2.0")
+app = FastAPI(title="SBOM Scan", version="2.3.0")
+
+
+def _purl_base(purl: str) -> str:
+    return purl.rsplit("@", 1)[0].lower()
+
+
+def apply_custom_advisories(results, advisories: list[CustomAdvisory]) -> int:
+    matched = 0
+    for result in results:
+        component = result.component
+        if not component.purl or not component.version:
+            continue
+        for advisory in advisories:
+            if _purl_base(component.purl) != advisory.component_purl or component.version != advisory.exact_version:
+                continue
+            matched += 1
+            aliases = sorted(set([advisory.id, *advisory.identifiers]))
+            existing = next((vuln for vuln in result.vulnerabilities if set(vuln.aliases) & set(advisory.identifiers)), None)
+            if existing:
+                existing.aliases = sorted(set(existing.aliases + aliases))
+                existing.references = list(dict.fromkeys(existing.references + [advisory.source_url]))[:5]
+                if "LocalIntel" not in existing.source:
+                    existing.source += "+LocalIntel"
+            else:
+                result.vulnerabilities.append(Vulnerability(
+                    id=advisory.id, aliases=aliases, summary=f"{advisory.title} - {advisory.reason}",
+                    severity=advisory.severity, published=advisory.created_at,
+                    references=[advisory.source_url], source="LocalIntel",
+                ))
+            result.status = "vulnerable"
+    return matched
 
 
 async def create_ai_summary(scan: ScanResult, base_url: str, api_key: str, model: str) -> str:
@@ -60,6 +92,40 @@ async def health() -> dict[str, str]:
 @app.get("/api/scans", response_model=list[ScanSummary])
 async def scan_history(limit: int = 20) -> list[ScanSummary]:
     return database.list_scans(limit)
+
+
+@app.get("/api/custom-advisories", response_model=list[CustomAdvisory])
+async def custom_advisories() -> list[CustomAdvisory]:
+    return database.list_custom_advisories()
+
+
+@app.post("/api/custom-advisories", response_model=CustomAdvisory, status_code=201)
+async def create_custom_advisory(payload: CustomAdvisoryCreate) -> CustomAdvisory:
+    if not payload.confirmed:
+        raise HTTPException(400, "Explicit confirmation is required")
+    if not payload.component_purl.startswith("pkg:"):
+        raise HTTPException(400, "A valid package URL is required")
+    if not payload.source_url.startswith(("https://", "http://")):
+        raise HTTPException(400, "A cited HTTP(S) source URL is required")
+    advisory = CustomAdvisory(
+        id="LOCAL-" + uuid.uuid4().hex[:12].upper(),
+        component_purl=_purl_base(payload.component_purl), exact_version=payload.exact_version,
+        title=payload.title, source_url=payload.source_url,
+        identifiers=sorted(set(payload.identifiers)), severity=payload.severity,
+        reason=payload.reason,
+        created_at=datetime.now(timezone.utc).astimezone().isoformat(timespec="seconds"),
+    )
+    try:
+        database.save_custom_advisory(advisory)
+    except sqlite3.IntegrityError as exc:
+        raise HTTPException(409, "This source is already confirmed for the component version") from exc
+    return advisory
+
+
+@app.delete("/api/custom-advisories/{advisory_id}", status_code=204)
+async def remove_custom_advisory(advisory_id: str) -> None:
+    if not database.delete_custom_advisory(advisory_id):
+        raise HTTPException(404, "Custom advisory not found")
 
 
 @app.get("/api/scans/{scan_id}", response_model=ScanResult)
@@ -111,6 +177,11 @@ async def scan(
             item.vulnerabilities.sort(key=lambda vuln: (not vuln.kev, SEVERITY_ORDER.get(vuln.severity, 4), -(vuln.epss or 0), vuln.id))
     elif requested_trivy:
         warnings.append("Trivy is not installed; the scan completed with OSV/NVD only")
+    local_matches = apply_custom_advisories(results, database.list_custom_advisories())
+    if local_matches:
+        engines.append("LocalIntel")
+        for item in results:
+            item.vulnerabilities.sort(key=lambda vuln: (not vuln.kev, SEVERITY_ORDER.get(vuln.severity, 4), -(vuln.epss or 0), vuln.id))
     active_results = [result for result in results if result.component.scope != "excluded"]
     excluded_results = [result for result in results if result.component.scope == "excluded"]
     vulnerabilities = [vuln for result in active_results for vuln in result.vulnerabilities]

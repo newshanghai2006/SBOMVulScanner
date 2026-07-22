@@ -17,6 +17,7 @@ def markdown_report(scan: ScanResult) -> str:
         f"- Known exploited (CISA KEV): {scan.kev_count}",
         f"- Findings with a known fix: {scan.fixable_count}",
         f"- Engines: {', '.join(scan.engines)}",
+        f"- Local intelligence matches: {sum(vuln.source == 'LocalIntel' or 'LocalIntel' in vuln.source for result in scan.results for vuln in result.vulnerabilities)}",
         f"- Data: {scan.data_freshness}", "",
         "> Database matches are potential exposure. Validate reachability, deployment context, vendor advisories, and VEX before making a final risk decision.", "",
     ]

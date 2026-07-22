@@ -7,6 +7,7 @@ const button = document.querySelector('#scanButton');
 const resultsSection = document.querySelector('#results');
 const componentList = document.querySelector('#componentList');
 let currentResults = [];
+let currentThreats = [];
 let activeFilter = 'all';
 
 const escapeHtml = (value = '') => String(value).replace(/[&<>'"]/g, char => ({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[char]));
@@ -70,15 +71,56 @@ function renderResult(data) {
 }
 
 function renderEmergingThreats(threats) {
+  currentThreats = threats;
   const section = document.querySelector('#emergingThreats');
   section.hidden = threats.length === 0;
-  document.querySelector('#emergingList').innerHTML = threats.map(item => `
+  document.querySelector('#emergingList').innerHTML = threats.map((item, index) => `
     <article class="emerging-item">
       <div><span class="unverified">未验证 · ${escapeHtml(item.confidence.toUpperCase())}</span><h4>${escapeHtml(item.title)}</h4><p>${escapeHtml(item.reason)}</p></div>
       <dl><div><dt>组件</dt><dd>${escapeHtml(item.component)} ${escapeHtml(item.installed_version || '')}</dd></div><div><dt>版本声明</dt><dd>${escapeHtml(item.affected_version_claim || '来源未给出明确范围')}</dd></div><div><dt>标识</dt><dd>${escapeHtml((item.identifiers || []).join(', ') || '尚无标准编号')}</dd></div></dl>
-      <a href="${escapeHtml(item.source_url)}" target="_blank" rel="noopener noreferrer">查看原始来源</a>
+      <div class="emerging-actions"><a href="${escapeHtml(item.source_url)}" target="_blank" rel="noopener noreferrer">查看原始来源</a><button data-confirm-threat="${index}" ${item.installed_version ? '' : 'disabled'}>确认并加入本地库</button></div>
     </article>`).join('');
 }
+
+document.querySelector('#emergingList').addEventListener('click', async event => {
+  const button = event.target.closest('[data-confirm-threat]'); if (!button) return;
+  const item = currentThreats[Number(button.dataset.confirmThreat)];
+  if (!item || !item.installed_version) return;
+  const confirmed = window.confirm(`确认将 ${item.component} ${item.installed_version} 作为精确版本漏洞加入本地库？\n\n来源：${item.source_url}\n\n该记录会参与后续扫描，但不会推断其他版本。`);
+  if (!confirmed) return;
+  button.disabled = true; button.textContent = '正在保存';
+  const response = await fetch('/api/custom-advisories', {
+    method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({
+      component_purl: item.component_purl, exact_version: item.installed_version,
+      title: item.title, source_url: item.source_url, identifiers: item.identifiers || [],
+      severity: 'UNKNOWN', reason: item.reason, confirmed: true,
+    }),
+  });
+  if (response.ok) {
+    button.textContent = '已加入 · 重新扫描后生效'; loadCustomAdvisories();
+  } else {
+    const error = await response.json(); button.disabled = false; button.textContent = error.detail || '保存失败';
+  }
+});
+
+async function loadCustomAdvisories() {
+  try {
+    const response = await fetch('/api/custom-advisories'); if (!response.ok) return;
+    const advisories = await response.json();
+    const section = document.querySelector('#localIntelSection'); section.hidden = advisories.length === 0;
+    document.querySelector('#localIntelCount').textContent = `${advisories.length} 条精确版本记录`;
+    document.querySelector('#localIntelList').innerHTML = advisories.map(item => `
+      <div class="local-intel-item" data-id="${escapeHtml(item.id)}"><div><span>${escapeHtml(item.id)} · ${escapeHtml(item.severity)}</span><strong>${escapeHtml(item.title)}</strong><small>${escapeHtml(item.component_purl)}@${escapeHtml(item.exact_version)}</small></div><a href="${escapeHtml(item.source_url)}" target="_blank" rel="noopener noreferrer">来源</a><button class="local-intel-delete" title="删除本地情报" aria-label="删除 ${escapeHtml(item.id)}">×</button></div>`).join('');
+  } catch (_) { /* Local intelligence management is non-critical to scanning. */ }
+}
+
+document.querySelector('#localIntelList').addEventListener('click', async event => {
+  const button = event.target.closest('.local-intel-delete'); if (!button) return;
+  const row = button.closest('.local-intel-item');
+  if (!window.confirm('删除这条本地情报？后续扫描将不再匹配它。')) return;
+  const response = await fetch(`/api/custom-advisories/${row.dataset.id}`, {method: 'DELETE'});
+  if (response.ok) loadCustomAdvisories();
+});
 
 function renderComponents() {
   const term = document.querySelector('#search').value.trim().toLowerCase();
@@ -135,3 +177,4 @@ document.querySelector('#historyList').addEventListener('click', async event => 
 });
 
 loadHistory();
+loadCustomAdvisories();
