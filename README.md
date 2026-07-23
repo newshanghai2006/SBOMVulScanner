@@ -54,7 +54,7 @@ cd sbom-scan
 python3 -m venv .venv
 .venv/bin/python -m pip install --upgrade pip
 .venv/bin/python -m pip install -r requirements.txt
-chmod +x start.sh stop.sh
+chmod +x start.sh start-public.sh stop.sh
 ```
 
 若 `python3 -m venv` 提示缺少 `ensurepip`，请先确认系统软件源已启用并重新安装 Python/Pip。若依赖需要本机编译，再安装构建工具：
@@ -98,12 +98,15 @@ PORT=8090 ./start.sh
 ssh -L 8090:127.0.0.1:8090 username@server-address
 ```
 
-仅当确实需要让局域网用户直接访问时才监听所有网卡：
+仅当确实需要让局域网用户直接访问时，使用公共监听启动脚本。该脚本固定监听 `0.0.0.0:8088`，停止仍使用 `stop.sh`：
 
 ```bash
-HOST=0.0.0.0 PORT=8088 ./start.sh
+./start-public.sh
 sudo firewall-cmd --permanent --add-port=8088/tcp
 sudo firewall-cmd --reload
+
+# 停止服务
+./stop.sh
 ```
 
 监听 `0.0.0.0` 会扩大暴露面。正式环境应使用 Nginx/Caddy 配置 HTTPS、访问控制和反向代理，并在不再需要外部访问时删除防火墙规则。
