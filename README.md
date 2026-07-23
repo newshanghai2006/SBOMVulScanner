@@ -5,6 +5,7 @@
 ## 功能
 
 - 支持 CycloneDX JSON 1.4+、SPDX JSON 2.x 和本项目 HBOM JSON。
+- 使用 Syft 从源码 ZIP 或受控 Git 仓库生成 CycloneDX/SPDX JSON，并直接下载。
 - 使用 CVE/GHSA/OSV 别名归并重复记录。
 - 解析 CVSS、OSV 版本区间和与当前版本对应的最小修复版本。
 - 使用成熟的生态版本规则比较 PyPI、npm、Maven、Go、Cargo、NuGet、RubyGems、Composer、Debian、RPM 和 Alpine 版本。
@@ -42,6 +43,22 @@
 
 项目定义格式见 `examples/hbom-example.json`。每个组件必须有 `name`；可靠扫描还必须提供标准 CPE 2.3。只有厂商和型号、没有 CPE 的组件会标为“待确认”，不会猜测匹配。
 
+## 从源码生成 SBOM
+
+源码生成是漏洞扫描前的独立步骤，使用 Syft 分析依赖清单和软件包元数据，不需要 LLM Base URL、API Key 或模型。支持以下输入：
+
+- 不超过 100 MB 的源码 ZIP；解压后最多 20,000 个文件、500 MB。
+- 受控的 `git clone` 命令，例如 `git clone -b release --single-branch http://10.1.1.1:3000/group/project.git`。
+
+Git 命令只接受 `-b/--branch` 和 `--single-branch`，不接受目标目录或其他 Git 参数。服务端不会通过 shell 执行输入，而是强制浅克隆到随机临时目录。ZIP 路径穿越和符号链接会被拒绝；Git 元数据会在分析前删除。请求完成后，上传内容、仓库工作区和生成文件都会从服务端临时目录删除。
+
+可输出并下载：
+
+- CycloneDX JSON，文件名以 `.cdx.json` 结尾。
+- SPDX JSON，文件名以 `.spdx.json` 结尾。
+
+下载后可在页面下方“选择清单”中上传该文件，继续执行原有漏洞扫描。
+
 ## openEuler 24.03 安装与运行
 
 以下命令面向 openEuler 24.03。建议使用普通用户安装和运行，不要使用 `root`，也不要把项目目录与其他用户共享。项目自己的 `.venv` 会隔离 Python 包，避免修改系统 Python 或其他人的虚拟环境。
@@ -57,6 +74,13 @@ python3 -m venv .venv
 chmod +x start.sh start-public.sh stop.sh
 ```
 
+源码 SBOM 生成功能还需要 Syft。生产环境应先审查安装脚本，或从 Anchore 官方发布页下载并校验固定版本：
+
+```bash
+curl -sSfL https://get.anchore.io/syft | sudo sh -s -- -b /usr/local/bin
+syft version
+```
+
 若 `python3 -m venv` 提示缺少 `ensurepip`，请先确认系统软件源已启用并重新安装 Python/Pip。若依赖需要本机编译，再安装构建工具：
 
 ```bash
@@ -65,11 +89,11 @@ sudo dnf install -y python3-devel gcc gcc-c++ make
 
 ### SSH 登录场景（推荐）
 
-启动脚本默认监听 `127.0.0.1:8088`，通过 `nohup` 在后台运行。SSH 断开不会终止服务：
+启动脚本默认监听 `127.0.0.1:8088`，通过 `nohup` 在后台运行。SSH 断开不会终止服务。若要使用 Git 仓库输入，必须显式配置允许的仓库主机，多个主机使用逗号分隔：
 
 ```bash
 cd /data/strix/sbom-scan
-./start.sh
+SBOM_GIT_ALLOWED_HOSTS=10.1.1.1,git.example.com ./start.sh
 cat data/server-state.json
 curl http://127.0.0.1:8088/api/health
 ```
@@ -101,7 +125,7 @@ ssh -L 8090:127.0.0.1:8090 username@server-address
 仅当确实需要让局域网用户直接访问时，使用公共监听启动脚本。该脚本固定监听 `0.0.0.0:8088`，停止仍使用 `stop.sh`：
 
 ```bash
-./start-public.sh
+SBOM_GIT_ALLOWED_HOSTS=10.1.1.1,git.example.com ./start-public.sh
 sudo firewall-cmd --permanent --add-port=8088/tcp
 sudo firewall-cmd --reload
 
@@ -109,7 +133,9 @@ sudo firewall-cmd --reload
 ./stop.sh
 ```
 
-监听 `0.0.0.0` 会扩大暴露面。正式环境应使用 Nginx/Caddy 配置 HTTPS、访问控制和反向代理，并在不再需要外部访问时删除防火墙规则。
+`SBOM_GIT_ALLOWED_HOSTS` 按主机名或 IP 精确匹配，不填写时禁用所有 Git 仓库输入，但 ZIP 生成仍可使用。不要在 HTTP(S) URL 中写密码；私有仓库应为运行服务的专用普通用户配置只读 SSH key 或 Git credential helper。
+
+监听 `0.0.0.0` 会扩大暴露面，源码生成又会消耗 CPU、内存和网络资源。正式环境应使用 Nginx/Caddy 配置 HTTPS、身份认证、请求大小限制和访问控制，并在不再需要外部访问时删除防火墙规则。
 
 ## Windows 安装
 

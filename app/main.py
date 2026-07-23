@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 import re
 import sqlite3
+import tempfile
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -18,6 +20,15 @@ from .models import CustomAdvisory, CustomAdvisoryCreate, ScanResult, ScanSummar
 from .parsers import DocumentError, parse_document
 from .report import markdown_report
 from .scanner import SEVERITY_ORDER, enrich_risk, scan_components
+from .sbom_generator import (
+    MAX_ARCHIVE_SIZE,
+    GenerationError,
+    clone_repository,
+    extract_zip,
+    generate_sbom,
+    parse_git_clone,
+    validate_source_tree,
+)
 from . import trivy
 from .threat_intel import search_emerging_threats
 
@@ -25,7 +36,7 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 MAX_FILE_SIZE = 5 * 1024 * 1024
 
 database.initialize()
-app = FastAPI(title="SBOM Scan", version="2.3.0")
+app = FastAPI(title="SBOM Scan", version="2.4.0")
 
 
 def _purl_base(purl: str) -> str:
@@ -142,6 +153,48 @@ async def remove_scan(scan_id: str) -> Response:
     if not database.delete_scan(scan_id):
         raise HTTPException(404, "Scan result not found")
     return Response(status_code=204)
+
+
+@app.post("/api/generate-sbom")
+async def create_sbom(
+    source_zip: UploadFile | None = File(None),
+    git_command: str | None = Form(None),
+    output_format: str = Form("cyclonedx"),
+) -> Response:
+    has_zip = bool(source_zip and source_zip.filename)
+    command = (git_command or "").strip()
+    if has_zip == bool(command):
+        raise HTTPException(400, "Provide exactly one source: a ZIP file or a git clone command")
+    if output_format not in {"cyclonedx", "spdx"}:
+        raise HTTPException(400, "Output format must be cyclonedx or spdx")
+
+    try:
+        with tempfile.TemporaryDirectory(prefix="sbom-source-") as temp_name:
+            workspace = Path(temp_name)
+            source_dir = workspace / "source"
+            if has_zip and source_zip:
+                content = await source_zip.read(MAX_ARCHIVE_SIZE + 1)
+                if len(content) > MAX_ARCHIVE_SIZE:
+                    raise HTTPException(413, "Source ZIP must not exceed 100 MB")
+                archive_path = workspace / "source.zip"
+                archive_path.write_bytes(content)
+                await asyncio.to_thread(extract_zip, archive_path, source_dir)
+                await asyncio.to_thread(validate_source_tree, source_dir)
+                source_name = Path(source_zip.filename or "source").stem
+            else:
+                git_source = parse_git_clone(command)
+                await clone_repository(git_source, source_dir)
+                source_name = Path(git_source.url.rstrip("/").rsplit("/", 1)[-1]).stem
+            document = await generate_sbom(source_dir, output_format)
+    except GenerationError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+    safe_name = re.sub(r"[^a-zA-Z0-9._-]", "_", source_name).strip("._") or "source"
+    suffix = "cdx.json" if output_format == "cyclonedx" else "spdx.json"
+    return Response(document, media_type="application/json", headers={
+        "Content-Disposition": f'attachment; filename="{safe_name}.{suffix}"',
+        "Cache-Control": "no-store",
+    })
 
 
 @app.post("/api/scan", response_model=ScanResult)

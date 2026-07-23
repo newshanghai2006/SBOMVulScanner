@@ -9,6 +9,7 @@ const componentList = document.querySelector('#componentList');
 let currentResults = [];
 let currentThreats = [];
 let activeFilter = 'all';
+let generatedSbomUrl = null;
 
 const escapeHtml = (value = '') => String(value).replace(/[&<>'"]/g, char => ({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[char]));
 
@@ -25,6 +26,62 @@ input.addEventListener('change', () => showFile(input.files[0]));
 dropzone.addEventListener('drop', event => {
   if (!event.dataTransfer.files.length) return;
   const transfer = new DataTransfer(); transfer.items.add(event.dataTransfer.files[0]); input.files = transfer.files; showFile(input.files[0]);
+});
+
+const generatorForm = document.querySelector('#generatorForm');
+const sourceZipInput = document.querySelector('#sourceZipInput');
+const gitCommand = document.querySelector('#gitCommand');
+const generatorError = document.querySelector('#generatorError');
+const generatorProgress = document.querySelector('#generatorProgress');
+const generateButton = document.querySelector('#generateButton');
+
+document.querySelectorAll('input[name="source_mode"]').forEach(radio => radio.addEventListener('change', () => {
+  const isZip = document.querySelector('input[name="source_mode"]:checked').value === 'zip';
+  document.querySelector('#zipSourcePanel').hidden = !isZip;
+  document.querySelector('#gitSourcePanel').hidden = isZip;
+  sourceZipInput.required = isZip;
+  gitCommand.required = !isZip;
+  if (isZip) gitCommand.value = ''; else sourceZipInput.value = '';
+}));
+sourceZipInput.required = true;
+sourceZipInput.addEventListener('change', () => {
+  const file = sourceZipInput.files[0];
+  document.querySelector('#sourceZipName').textContent = file ? `${file.name} · ${(file.size / 1024 / 1024).toFixed(1)} MB` : '尚未选择文件';
+});
+
+function downloadFilename(response, fallback) {
+  const match = (response.headers.get('Content-Disposition') || '').match(/filename="([^"]+)"/i);
+  return match ? match[1] : fallback;
+}
+
+generatorForm.addEventListener('submit', async event => {
+  event.preventDefault();
+  generatorError.hidden = true; generatorProgress.hidden = false; generateButton.disabled = true;
+  document.querySelector('#generatorResult').hidden = true;
+  generateButton.querySelector('span').textContent = '正在分析源码';
+  const formData = new FormData(generatorForm);
+  formData.delete('source_mode');
+  try {
+    const response = await fetch('/api/generate-sbom', {method: 'POST', body: formData});
+    if (!response.ok) {
+      const data = await response.json(); throw new Error(data.detail || 'SBOM 生成失败');
+    }
+    const blob = await response.blob();
+    const sbomDocument = JSON.parse(await blob.text());
+    const isCycloneDx = sbomDocument.bomFormat === 'CycloneDX';
+    const count = isCycloneDx ? (sbomDocument.components || []).length : (sbomDocument.packages || []).length;
+    const format = isCycloneDx ? 'CycloneDX' : 'SPDX';
+    if (generatedSbomUrl) URL.revokeObjectURL(generatedSbomUrl);
+    generatedSbomUrl = URL.createObjectURL(blob);
+    const download = document.querySelector('#downloadSbom');
+    download.href = generatedSbomUrl; download.download = downloadFilename(response, `source.${isCycloneDx ? 'cdx' : 'spdx'}.json`);
+    document.querySelector('#generatedSummary').textContent = `${format} JSON · ${count} 个组件`;
+    document.querySelector('#generatorResult').hidden = false;
+  } catch (error) {
+    generatorError.textContent = error.message; generatorError.hidden = false;
+  } finally {
+    generatorProgress.hidden = true; generateButton.disabled = false; generateButton.querySelector('span').textContent = '生成 SBOM';
+  }
 });
 
 form.addEventListener('submit', async event => {

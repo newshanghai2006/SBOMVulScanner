@@ -17,7 +17,48 @@
     <section class="intro">
       <p class="eyebrow">供应链安全工作台</p>
       <h1>识别组件，定位已知风险</h1>
-      <p>上传标准 SBOM 或硬件 HBOM，依据 OSV 与 NVD 的当前数据完成可追溯匹配。</p>
+      <p>从源码生成标准 SBOM，或上传已有 SBOM/HBOM，依据当前漏洞数据完成可追溯匹配。</p>
+    </section>
+
+    <section class="workspace generator-workspace" id="generatorPanel">
+      <form id="generatorForm">
+        <div class="form-head">
+          <div><span class="step">01</span><h2>从源码生成 SBOM</h2></div>
+          <div class="segmented" role="radiogroup" aria-label="SBOM 输出格式">
+            <label><input type="radio" name="output_format" value="cyclonedx" checked><span>CycloneDX JSON</span></label>
+            <label><input type="radio" name="output_format" value="spdx"><span>SPDX JSON</span></label>
+          </div>
+        </div>
+        <div class="source-mode segmented" role="radiogroup" aria-label="源码输入方式">
+          <label><input type="radio" name="source_mode" value="zip" checked><span>上传 ZIP</span></label>
+          <label><input type="radio" name="source_mode" value="git"><span>Git 仓库</span></label>
+        </div>
+        <div class="source-input" id="zipSourcePanel">
+          <label class="source-file">
+            <input id="sourceZipInput" name="source_zip" type="file" accept=".zip,application/zip">
+            <span>选择源码 ZIP</span><strong id="sourceZipName">尚未选择文件</strong>
+          </label>
+        </div>
+        <div class="source-input" id="gitSourcePanel" hidden>
+          <label for="gitCommand">Git clone 命令</label>
+          <textarea id="gitCommand" name="git_command" rows="3" spellcheck="false" placeholder="git clone -b release --single-branch http://git.example.com/group/project.git"></textarea>
+        </div>
+        <div class="action-row">
+          <p>源码仅在临时目录处理，完成后自动删除</p>
+          <button class="primary" id="generateButton" type="submit">
+            <svg viewBox="0 0 24 24"><path d="M12 3v12m0 0 5-5m-5 5-5-5M5 20h14"/></svg>
+            <span>生成 SBOM</span>
+          </button>
+        </div>
+      </form>
+      <div class="progress" id="generatorProgress" hidden><span></span></div>
+      <div class="error" id="generatorError" role="alert" hidden></div>
+      <div class="generator-result" id="generatorResult" hidden>
+        <div><span>生成完成</span><strong id="generatedSummary"></strong></div>
+        <a class="download" id="downloadSbom" href="#" download>
+          <svg viewBox="0 0 24 24"><path d="M12 3v12m0 0 5-5m-5 5-5-5M5 20h14"/></svg>下载 SBOM
+        </a>
+      </div>
     </section>
 
     <section class="history" id="historySection" hidden>
@@ -30,7 +71,7 @@
       <div class="local-intel-list" id="localIntelList"></div>
     </section>
 
-    <section class="workspace" id="scanPanel">
+    <section class="workspace scan-workspace" id="scanPanel">
       <form id="scanForm">
         <div class="form-head">
           <div><span class="step">01</span><h2>选择清单</h2></div>
