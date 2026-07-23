@@ -1,6 +1,6 @@
 param(
     [ValidateRange(1, 65535)]
-    [int]$Port = 8000,
+    [int]$Port = 8088,
     [string]$HostAddress = "127.0.0.1"
 )
 
@@ -66,4 +66,3 @@ if (-not $ready) {
 Write-Host "SBOM Scan started (PID $($process.Id))."
 Write-Host "URL: http://${HostAddress}:${Port}"
 Write-Host "Stop: .\stop.ps1"
-

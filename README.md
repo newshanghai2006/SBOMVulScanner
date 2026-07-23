@@ -42,50 +42,71 @@
 
 项目定义格式见 `examples/hbom-example.json`。每个组件必须有 `name`；可靠扫描还必须提供标准 CPE 2.3。只有厂商和型号、没有 CPE 的组件会标为“待确认”，不会猜测匹配。
 
-## Linux 安装
+## openEuler 24.03 安装与运行
 
-推荐 Python 3.11 或 3.12。以下命令适用于 Ubuntu/Debian：
+以下命令面向 openEuler 24.03。建议使用普通用户安装和运行，不要使用 `root`，也不要把项目目录与其他用户共享。项目自己的 `.venv` 会隔离 Python 包，避免修改系统 Python 或其他人的虚拟环境。
 
 ```bash
-sudo apt update
-sudo apt install -y python3 python3-venv python3-pip git curl ca-certificates
+sudo dnf install -y python3 python3-pip git curl ca-certificates
 
 git clone <your-repository-url> sbom-scan
 cd sbom-scan
 python3 -m venv .venv
-source .venv/bin/activate
-python -m pip install --upgrade pip
-python -m pip install -r requirements.txt
+.venv/bin/python -m pip install --upgrade pip
+.venv/bin/python -m pip install -r requirements.txt
+chmod +x start.sh stop.sh
 ```
 
-推荐使用启动脚本，默认固定监听 `127.0.0.1:8000`：
+若 `python3 -m venv` 提示缺少 `ensurepip`，请先确认系统软件源已启用并重新安装 Python/Pip。若依赖需要本机编译，再安装构建工具：
 
 ```bash
-chmod +x start.sh stop.sh
+sudo dnf install -y python3-devel gcc gcc-c++ make
+```
+
+### SSH 登录场景（推荐）
+
+启动脚本默认监听 `127.0.0.1:8088`，通过 `nohup` 在后台运行。SSH 断开不会终止服务：
+
+```bash
+cd /data/strix/sbom-scan
 ./start.sh
+cat data/server-state.json
+curl http://127.0.0.1:8088/api/health
+```
+
+在自己的电脑上建立 SSH 隧道（将用户名和服务器地址替换为实际值）：
+
+```bash
+ssh -L 8088:127.0.0.1:8088 username@server-address
+```
+
+保持该 SSH 窗口连接，然后在本机浏览器打开 `http://127.0.0.1:8088`。这种方式无需开放服务器防火墙端口，其他网络用户也不能直接访问 Web 服务。
+
+查看日志和安全停止：
+
+```bash
+tail -f data/server.out.log data/server.err.log
 ./stop.sh
 ```
 
-需要使用其他固定端口时：
+`start.sh` 强制使用当前项目的 `.venv/bin/python`，不会退回系统 Python。`stop.sh` 只读取本项目的 `data/server.pid`，并校验目标进程的 Uvicorn 命令行和 `/proc/<PID>/cwd` 都属于当前项目后才停止。它不会执行 `pkill python` 或 `killall python`，因此不会结束其他用户或其他项目的 Python 进程。不要手工修改或与其他项目共用 `data/server.pid`。
+
+需要改用其他端口时，启动和 SSH 隧道中的端口必须一致：
 
 ```bash
-PORT=8080 ./start.sh
+PORT=8090 ./start.sh
+ssh -L 8090:127.0.0.1:8090 username@server-address
 ```
 
-也可以手工启动开发或内网服务：
+仅当确实需要让局域网用户直接访问时才监听所有网卡：
 
 ```bash
-source .venv/bin/activate
-uvicorn app.main:app --host 127.0.0.1 --port 8000
+HOST=0.0.0.0 PORT=8088 ./start.sh
+sudo firewall-cmd --permanent --add-port=8088/tcp
+sudo firewall-cmd --reload
 ```
 
-仅在确实需要局域网访问时监听所有网卡，并通过防火墙或反向代理限制来源：
-
-```bash
-uvicorn app.main:app --host 0.0.0.0 --port 8000
-```
-
-浏览器访问 `http://127.0.0.1:8000`。生产部署建议在 Nginx/Caddy 后运行 Uvicorn，并使用 systemd 或其他进程管理器保持服务运行。
+监听 `0.0.0.0` 会扩大暴露面。正式环境应使用 Nginx/Caddy 配置 HTTPS、访问控制和反向代理，并在不再需要外部访问时删除防火墙规则。
 
 ## Windows 安装
 
@@ -107,15 +128,15 @@ python -m pip install -r requirements.txt
 推荐使用固定端口启动和 PID 安全关闭脚本：
 
 ```powershell
-.\start.ps1                  # 默认 127.0.0.1:8000
-.\start.ps1 -Port 8080       # 指定固定端口
+.\start.ps1                  # 默认 127.0.0.1:8088
+.\start.ps1 -Port 8090       # 指定固定端口
 .\stop.ps1                   # 只关闭 start.ps1 记录的本项目进程
 ```
 
 也可以按端口强制停止任意 TCP 监听进程：
 
 ```bat
-stop.bat 8000
+stop.bat 8088
 ```
 
 `stop.bat` 会显示监听进程后执行 `taskkill /F`。它不校验该进程是否属于 SBOM Scan，因此使用前必须确认端口正确；权限不足时需要以管理员身份运行。
@@ -143,7 +164,7 @@ trivy --version
 
 ```bash
 export TRIVY_PATH=/opt/trivy/bin/trivy
-uvicorn app.main:app --host 127.0.0.1 --port 8000
+./start.sh
 ```
 
 ## 扫描引擎

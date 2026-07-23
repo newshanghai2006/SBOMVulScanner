@@ -23,7 +23,7 @@ echo.
 set "FOUND=0"
 set "KILLED_PIDS= "
 
-REM The trailing space prevents port 8000 from matching 80001 or 18000.
+REM The trailing space prevents port 8088 from matching 80880 or 18088.
 for /F "tokens=5" %%P in ('netstat -ano -p tcp ^| findstr /C:":%PORT_NUMBER% " ^| findstr "LISTENING"') do (
     echo(!KILLED_PIDS!| findstr /C:" %%P " >nul
     if errorlevel 1 (

@@ -9,7 +9,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import httpx
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile
+from fastapi import FastAPI, File, Form, HTTPException, Response, UploadFile
 from fastapi.responses import PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 
@@ -122,10 +122,11 @@ async def create_custom_advisory(payload: CustomAdvisoryCreate) -> CustomAdvisor
     return advisory
 
 
-@app.delete("/api/custom-advisories/{advisory_id}", status_code=204)
-async def remove_custom_advisory(advisory_id: str) -> None:
+@app.delete("/api/custom-advisories/{advisory_id}", status_code=204, response_class=Response)
+async def remove_custom_advisory(advisory_id: str) -> Response:
     if not database.delete_custom_advisory(advisory_id):
         raise HTTPException(404, "Custom advisory not found")
+    return Response(status_code=204)
 
 
 @app.get("/api/scans/{scan_id}", response_model=ScanResult)
@@ -136,10 +137,11 @@ async def saved_scan(scan_id: str) -> ScanResult:
     return result
 
 
-@app.delete("/api/scans/{scan_id}", status_code=204)
-async def remove_scan(scan_id: str) -> None:
+@app.delete("/api/scans/{scan_id}", status_code=204, response_class=Response)
+async def remove_scan(scan_id: str) -> Response:
     if not database.delete_scan(scan_id):
         raise HTTPException(404, "Scan result not found")
+    return Response(status_code=204)
 
 
 @app.post("/api/scan", response_model=ScanResult)

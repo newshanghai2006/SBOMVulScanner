@@ -8,7 +8,7 @@ STATE_FILE="$DATA_DIR/server-state.json"
 STDOUT_LOG="$DATA_DIR/server.out.log"
 STDERR_LOG="$DATA_DIR/server.err.log"
 HOST=${HOST:-127.0.0.1}
-PORT=${PORT:-8000}
+PORT=${PORT:-8088}
 
 mkdir -p "$DATA_DIR"
 
@@ -23,7 +23,11 @@ if [ -f "$PID_FILE" ]; then
 fi
 
 PYTHON="$ROOT/.venv/bin/python"
-if [ ! -x "$PYTHON" ]; then PYTHON=$(command -v python3 || command -v python); fi
+if [ ! -x "$PYTHON" ]; then
+    echo "Project virtual environment not found: $PYTHON" >&2
+    echo "Create it with: python3 -m venv .venv && .venv/bin/python -m pip install -r requirements.txt" >&2
+    exit 1
+fi
 
 if ! "$PYTHON" - "$HOST" "$PORT" <<'PY'
 import socket, sys
@@ -71,4 +75,3 @@ fi
 echo "SBOM Scan started (PID $PID)."
 echo "URL: http://$HOST:$PORT"
 echo "Stop: ./stop.sh"
-
