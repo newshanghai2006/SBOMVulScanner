@@ -96,7 +96,7 @@ sudo dnf install -y python3-devel gcc gcc-c++ make
 启动脚本默认监听 `127.0.0.1:8088`，通过 `nohup` 在后台运行。SSH 断开不会终止服务。若要使用 Git 仓库输入，必须显式配置允许的仓库主机，多个主机使用逗号分隔：
 
 ```bash
-cd /data/strix/sbom-scan
+cd /data/sample_dir/sbom-scan
 SBOM_GIT_ALLOWED_HOSTS=10.1.1.1,git.example.com ./start.sh
 cat data/server-state.json
 curl http://127.0.0.1:8088/api/health
@@ -142,7 +142,7 @@ sudo firewall-cmd --reload
 主机白名单与仓库认证是两层独立控制。出现 `仓库主机未被服务器管理员允许` 时，认证弹窗不会绕过该限制。例如允许 `10.1.1.1`：
 
 ```bash
-cd /data/strix/sbom-scan
+cd /data/sample_dir/sbom-scan
 ./stop.sh
 SBOM_GIT_ALLOWED_HOSTS=10.1.1.1 ./start-public.sh
 ```
