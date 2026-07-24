@@ -137,12 +137,12 @@ sudo firewall-cmd --reload
 
 `SBOM_GIT_ALLOWED_HOSTS` 按主机名或 IP 精确匹配，不填写时禁用所有 Git 仓库输入，但 ZIP 生成仍可使用。不要在 HTTP(S) URL 中写密码；私有仓库应为运行服务的专用普通用户配置只读 SSH key 或 Git credential helper。
 
-主机白名单与仓库认证是两层独立控制。出现 `仓库主机未被服务器管理员允许` 时，认证弹窗不会绕过该限制。例如允许 `10.180.200.18`：
+主机白名单与仓库认证是两层独立控制。出现 `仓库主机未被服务器管理员允许` 时，认证弹窗不会绕过该限制。例如允许 `10.1.1.1`：
 
 ```bash
 cd /data/strix/sbom-scan
 ./stop.sh
-SBOM_GIT_ALLOWED_HOSTS=10.180.200.18 ./start-public.sh
+SBOM_GIT_ALLOWED_HOSTS=10.1.1.1 ./start-public.sh
 ```
 
 重启后再次生成：若仓库公开则直接克隆；若仓库需要 HTTP Basic、GitLab/Gitea 用户密码或访问令牌，页面会在服务器返回认证失败后弹出认证窗口。使用令牌时，“用户名”填写该 Git 平台要求的用户名，“密码或访问令牌”填写令牌。
@@ -176,19 +176,19 @@ python -m pip install -r requirements.txt
 
 ### Windows 配置 Git 仓库主机白名单
 
-出现 `仓库主机 '10.180.200.18' 未被服务器管理员允许` 时，需要先停止现有服务，再把该主机传给本项目启动脚本：
+出现 `仓库主机 '10.1.1.1' 未被服务器管理员允许` 时，需要先停止现有服务，再把该主机传给本项目启动脚本：
 
 ```powershell
 cd D:\path\to\sbom-scan
 .\stop.ps1
-.\start.ps1 -GitAllowedHosts "10.180.200.18"
+.\start.ps1 -GitAllowedHosts "10.1.1.1"
 ```
 
 多个仓库主机使用英文逗号分隔：
 
 ```powershell
 .\stop.ps1
-.\start.ps1 -GitAllowedHosts "10.180.200.18,git.example.com"
+.\start.ps1 -GitAllowedHosts "10.1.1.1,git.example.com"
 ```
 
 `-GitAllowedHosts` 只设置本次启动的 SBOM Scan 子进程，不修改其他用户、其他终端或其他 Python 进程。服务已经运行时必须先执行 `stop.ps1`，否则 `start.ps1` 会保留原进程，新的白名单不会生效。
@@ -197,7 +197,7 @@ cd D:\path\to\sbom-scan
 
 ```powershell
 .\stop.ps1
-$env:SBOM_GIT_ALLOWED_HOSTS = "10.180.200.18"
+$env:SBOM_GIT_ALLOWED_HOSTS = "10.1.1.1"
 .\start.ps1
 ```
 
@@ -206,7 +206,7 @@ $env:SBOM_GIT_ALLOWED_HOSTS = "10.180.200.18"
 ```powershell
 [Environment]::SetEnvironmentVariable(
     "SBOM_GIT_ALLOWED_HOSTS",
-    "10.180.200.18,git.example.com",
+    "10.1.1.1,git.example.com",
     "User"
 )
 ```
@@ -221,7 +221,7 @@ $env:SBOM_GIT_ALLOWED_HOSTS = "10.180.200.18"
 
 ```powershell
 .\stop.ps1
-.\start.ps1 -HostAddress "0.0.0.0" -Port 8088 -GitAllowedHosts "10.180.200.18"
+.\start.ps1 -HostAddress "0.0.0.0" -Port 8088 -GitAllowedHosts "10.1.1.1"
 ```
 
 白名单只允许服务器连接指定 Git 主机，不等于仓库身份认证。主机允许后，如果 HTTP(S) 私有仓库拒绝匿名访问，页面才会弹出用户名和密码/访问令牌窗口。
