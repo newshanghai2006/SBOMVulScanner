@@ -24,6 +24,7 @@ def initialize() -> None:
         connection.execute("""
             CREATE TABLE IF NOT EXISTS scans (
                 scan_id TEXT PRIMARY KEY,
+                owner_id TEXT NOT NULL DEFAULT 'legacy',
                 document_type TEXT NOT NULL,
                 document_name TEXT NOT NULL,
                 document_hash TEXT,
@@ -39,10 +40,13 @@ def initialize() -> None:
         columns = {row["name"] for row in connection.execute("PRAGMA table_info(scans)")}
         if "excluded_vulnerability_count" not in columns:
             connection.execute("ALTER TABLE scans ADD COLUMN excluded_vulnerability_count INTEGER NOT NULL DEFAULT 0")
-        connection.execute("CREATE INDEX IF NOT EXISTS scans_scanned_at_idx ON scans(scanned_at DESC)")
+        if "owner_id" not in columns:
+            connection.execute("ALTER TABLE scans ADD COLUMN owner_id TEXT NOT NULL DEFAULT 'legacy'")
+        connection.execute("CREATE INDEX IF NOT EXISTS scans_owner_time_idx ON scans(owner_id, scanned_at DESC)")
         connection.execute("""
             CREATE TABLE IF NOT EXISTS custom_advisories (
                 id TEXT PRIMARY KEY,
+                owner_id TEXT NOT NULL,
                 component_purl TEXT NOT NULL,
                 exact_version TEXT NOT NULL,
                 title TEXT NOT NULL,
@@ -51,67 +55,100 @@ def initialize() -> None:
                 severity TEXT NOT NULL DEFAULT 'UNKNOWN',
                 reason TEXT NOT NULL,
                 created_at TEXT NOT NULL,
-                UNIQUE(component_purl, exact_version, source_url)
+                UNIQUE(owner_id, component_purl, exact_version, source_url)
             )
         """)
-        connection.execute("CREATE INDEX IF NOT EXISTS custom_advisories_component_idx ON custom_advisories(component_purl, exact_version)")
+        advisory_columns = {row["name"] for row in connection.execute("PRAGMA table_info(custom_advisories)")}
+        if "owner_id" not in advisory_columns:
+            connection.execute("DROP INDEX IF EXISTS custom_advisories_component_idx")
+            connection.execute("ALTER TABLE custom_advisories RENAME TO custom_advisories_legacy")
+            connection.execute("""
+                CREATE TABLE custom_advisories (
+                    id TEXT PRIMARY KEY,
+                    owner_id TEXT NOT NULL,
+                    component_purl TEXT NOT NULL,
+                    exact_version TEXT NOT NULL,
+                    title TEXT NOT NULL,
+                    source_url TEXT NOT NULL,
+                    identifiers_json TEXT NOT NULL DEFAULT '[]',
+                    severity TEXT NOT NULL DEFAULT 'UNKNOWN',
+                    reason TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    UNIQUE(owner_id, component_purl, exact_version, source_url)
+                )
+            """)
+            connection.execute("""
+                INSERT INTO custom_advisories (
+                    id, owner_id, component_purl, exact_version, title, source_url,
+                    identifiers_json, severity, reason, created_at
+                )
+                SELECT id, 'legacy', component_purl, exact_version, title, source_url,
+                       identifiers_json, severity, reason, created_at
+                FROM custom_advisories_legacy
+            """)
+            connection.execute("DROP TABLE custom_advisories_legacy")
+        connection.execute("CREATE INDEX IF NOT EXISTS custom_advisories_owner_component_idx ON custom_advisories(owner_id, component_purl, exact_version)")
 
 
-def save_scan(scan: ScanResult) -> None:
+def save_scan(scan: ScanResult, owner_id: str) -> None:
     with _connect() as connection:
         connection.execute("""
             INSERT OR REPLACE INTO scans (
-                scan_id, document_type, document_name, document_hash, scanned_at,
+                scan_id, owner_id, document_type, document_name, document_hash, scanned_at,
                 total_components, vulnerable_components, vulnerability_count,
                 excluded_vulnerability_count, kev_count, result_json
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
-            scan.scan_id, scan.document_type, scan.document_name, scan.document_hash, scan.scanned_at,
+            scan.scan_id, owner_id, scan.document_type, scan.document_name, scan.document_hash, scan.scanned_at,
             scan.total_components, scan.vulnerable_components, scan.vulnerability_count,
             scan.excluded_vulnerability_count, scan.kev_count, scan.model_dump_json(),
         ))
 
 
-def get_scan(scan_id: str) -> ScanResult | None:
+def get_scan(scan_id: str, owner_id: str) -> ScanResult | None:
     with _connect() as connection:
-        row = connection.execute("SELECT result_json FROM scans WHERE scan_id = ?", (scan_id,)).fetchone()
+        row = connection.execute(
+            "SELECT result_json FROM scans WHERE scan_id = ? AND owner_id = ?", (scan_id, owner_id),
+        ).fetchone()
     return ScanResult.model_validate_json(row["result_json"]) if row else None
 
 
-def list_scans(limit: int = 20) -> list[ScanSummary]:
+def list_scans(owner_id: str, limit: int = 20) -> list[ScanSummary]:
     with _connect() as connection:
         rows = connection.execute("""
             SELECT scan_id, document_type, document_name, document_hash, scanned_at,
                    total_components, vulnerable_components, vulnerability_count,
                    excluded_vulnerability_count, kev_count
-            FROM scans ORDER BY scanned_at DESC LIMIT ?
-        """, (min(max(limit, 1), 100),)).fetchall()
+            FROM scans WHERE owner_id = ? ORDER BY scanned_at DESC LIMIT ?
+        """, (owner_id, min(max(limit, 1), 100))).fetchall()
     return [ScanSummary.model_validate(dict(row)) for row in rows]
 
 
-def delete_scan(scan_id: str) -> bool:
+def delete_scan(scan_id: str, owner_id: str) -> bool:
     with _connect() as connection:
-        cursor = connection.execute("DELETE FROM scans WHERE scan_id = ?", (scan_id,))
+        cursor = connection.execute("DELETE FROM scans WHERE scan_id = ? AND owner_id = ?", (scan_id, owner_id))
     return cursor.rowcount > 0
 
 
-def save_custom_advisory(advisory: CustomAdvisory) -> None:
+def save_custom_advisory(advisory: CustomAdvisory, owner_id: str) -> None:
     with _connect() as connection:
         connection.execute("""
             INSERT INTO custom_advisories (
-                id, component_purl, exact_version, title, source_url,
+                id, owner_id, component_purl, exact_version, title, source_url,
                 identifiers_json, severity, reason, created_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
-            advisory.id, advisory.component_purl, advisory.exact_version, advisory.title,
+            advisory.id, owner_id, advisory.component_purl, advisory.exact_version, advisory.title,
             advisory.source_url, json.dumps(advisory.identifiers, ensure_ascii=False),
             advisory.severity, advisory.reason, advisory.created_at,
         ))
 
 
-def list_custom_advisories() -> list[CustomAdvisory]:
+def list_custom_advisories(owner_id: str) -> list[CustomAdvisory]:
     with _connect() as connection:
-        rows = connection.execute("SELECT * FROM custom_advisories ORDER BY created_at DESC").fetchall()
+        rows = connection.execute(
+            "SELECT * FROM custom_advisories WHERE owner_id = ? ORDER BY created_at DESC", (owner_id,),
+        ).fetchall()
     return [CustomAdvisory(
         id=row["id"], component_purl=row["component_purl"], exact_version=row["exact_version"],
         title=row["title"], source_url=row["source_url"], identifiers=json.loads(row["identifiers_json"]),
@@ -119,7 +156,9 @@ def list_custom_advisories() -> list[CustomAdvisory]:
     ) for row in rows]
 
 
-def delete_custom_advisory(advisory_id: str) -> bool:
+def delete_custom_advisory(advisory_id: str, owner_id: str) -> bool:
     with _connect() as connection:
-        cursor = connection.execute("DELETE FROM custom_advisories WHERE id = ?", (advisory_id,))
+        cursor = connection.execute(
+            "DELETE FROM custom_advisories WHERE id = ? AND owner_id = ?", (advisory_id, owner_id),
+        )
     return cursor.rowcount > 0

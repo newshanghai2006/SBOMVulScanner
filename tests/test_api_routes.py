@@ -1,4 +1,5 @@
 import json
+import hashlib
 from io import BytesIO
 from zipfile import ZipFile
 
@@ -6,6 +7,8 @@ from fastapi import Response
 from fastapi.testclient import TestClient
 
 from app.main import app
+from app import database
+from app.models import Component, ComponentResult, ScanResult
 from app.sbom_generator import GitAuthenticationRequired
 
 
@@ -28,6 +31,34 @@ def test_frontend_assets_disable_browser_cache():
     assert page.headers["cache-control"] == "no-store"
     assert script.headers["cache-control"] == "no-store"
     assert "/app.js?v=2.5.0" in page.text
+
+
+def test_scan_history_is_isolated_by_browser_session(tmp_path, monkeypatch):
+    monkeypatch.setattr(database, "DATA_DIR", tmp_path)
+    monkeypatch.setattr(database, "DB_PATH", tmp_path / "sessions.db")
+    database.initialize()
+    client_a = TestClient(app)
+    client_b = TestClient(app)
+
+    page = client_a.get("/")
+    cookie = client_a.cookies.get("sbom_scan_session")
+    owner_a = hashlib.sha256(cookie.encode("ascii")).hexdigest()
+    scan = ScanResult(
+        scan_id="private-scan", document_type="cyclonedx", document_name="private.json",
+        scanned_at="2026-01-01T00:00:00Z", total_components=1, vulnerable_components=0,
+        vulnerability_count=0,
+        results=[ComponentResult(component=Component(name="private-component"), status="unknown")],
+    )
+    database.save_scan(scan, owner_a)
+
+    assert "HttpOnly" in page.headers["set-cookie"]
+    assert "SameSite=strict" in page.headers["set-cookie"]
+    assert client_a.get("/api/scans").json()[0]["scan_id"] == "private-scan"
+    assert client_b.get("/api/scans").json() == []
+    assert client_b.get("/api/scans/private-scan").status_code == 404
+    assert client_b.get("/api/report/private-scan").status_code == 404
+    assert client_b.delete("/api/scans/private-scan").status_code == 404
+    assert client_a.get("/api/scans/private-scan").status_code == 200
 
 
 def test_generate_sbom_requires_exactly_one_source():

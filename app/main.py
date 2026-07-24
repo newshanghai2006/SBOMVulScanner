@@ -4,6 +4,7 @@ import asyncio
 import hashlib
 import json
 import re
+import secrets
 import sqlite3
 import tempfile
 import uuid
@@ -37,14 +38,26 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 MAX_FILE_SIZE = 100 * 1024 * 1024
 
 database.initialize()
-app = FastAPI(title="SBOM Scan", version="2.5.0")
+app = FastAPI(title="SBOM Scan", version="2.6.0")
+SESSION_COOKIE = "sbom_scan_session"
+SESSION_PATTERN = re.compile(r"^[A-Za-z0-9_-]{43}$")
 
 
 @app.middleware("http")
 async def disable_frontend_cache(request: Request, call_next):
+    session_token = request.cookies.get(SESSION_COOKIE, "")
+    new_session = not SESSION_PATTERN.fullmatch(session_token)
+    if new_session:
+        session_token = secrets.token_urlsafe(32)
+    request.state.owner_id = hashlib.sha256(session_token.encode("ascii")).hexdigest()
     response = await call_next(request)
     if request.url.path in {"/", "/index.html", "/app.js", "/styles.css"}:
         response.headers["Cache-Control"] = "no-store"
+    if new_session:
+        response.set_cookie(
+            SESSION_COOKIE, session_token, max_age=365 * 24 * 60 * 60,
+            httponly=True, secure=request.url.scheme == "https", samesite="strict", path="/",
+        )
     return response
 
 
@@ -121,17 +134,17 @@ async def health() -> dict[str, str]:
 
 
 @app.get("/api/scans", response_model=list[ScanSummary])
-async def scan_history(limit: int = 20) -> list[ScanSummary]:
-    return database.list_scans(limit)
+async def scan_history(request: Request, limit: int = 20) -> list[ScanSummary]:
+    return database.list_scans(request.state.owner_id, limit)
 
 
 @app.get("/api/custom-advisories", response_model=list[CustomAdvisory])
-async def custom_advisories() -> list[CustomAdvisory]:
-    return database.list_custom_advisories()
+async def custom_advisories(request: Request) -> list[CustomAdvisory]:
+    return database.list_custom_advisories(request.state.owner_id)
 
 
 @app.post("/api/custom-advisories", response_model=CustomAdvisory, status_code=201)
-async def create_custom_advisory(payload: CustomAdvisoryCreate) -> CustomAdvisory:
+async def create_custom_advisory(payload: CustomAdvisoryCreate, request: Request) -> CustomAdvisory:
     if not payload.confirmed:
         raise HTTPException(400, "Explicit confirmation is required")
     if not payload.component_purl.startswith("pkg:"):
@@ -147,30 +160,30 @@ async def create_custom_advisory(payload: CustomAdvisoryCreate) -> CustomAdvisor
         created_at=datetime.now(timezone.utc).astimezone().isoformat(timespec="seconds"),
     )
     try:
-        database.save_custom_advisory(advisory)
+        database.save_custom_advisory(advisory, request.state.owner_id)
     except sqlite3.IntegrityError as exc:
         raise HTTPException(409, "This source is already confirmed for the component version") from exc
     return advisory
 
 
 @app.delete("/api/custom-advisories/{advisory_id}", status_code=204, response_class=Response)
-async def remove_custom_advisory(advisory_id: str) -> Response:
-    if not database.delete_custom_advisory(advisory_id):
+async def remove_custom_advisory(advisory_id: str, request: Request) -> Response:
+    if not database.delete_custom_advisory(advisory_id, request.state.owner_id):
         raise HTTPException(404, "Custom advisory not found")
     return Response(status_code=204)
 
 
 @app.get("/api/scans/{scan_id}", response_model=ScanResult)
-async def saved_scan(scan_id: str) -> ScanResult:
-    result = database.get_scan(scan_id)
+async def saved_scan(scan_id: str, request: Request) -> ScanResult:
+    result = database.get_scan(scan_id, request.state.owner_id)
     if not result:
         raise HTTPException(404, "Scan result not found")
     return result
 
 
 @app.delete("/api/scans/{scan_id}", status_code=204, response_class=Response)
-async def remove_scan(scan_id: str) -> Response:
-    if not database.delete_scan(scan_id):
+async def remove_scan(scan_id: str, request: Request) -> Response:
+    if not database.delete_scan(scan_id, request.state.owner_id):
         raise HTTPException(404, "Scan result not found")
     return Response(status_code=204)
 
@@ -228,7 +241,7 @@ async def create_sbom(
 
 @app.post("/api/scan", response_model=ScanResult)
 async def scan(
-    file: UploadFile = File(...), document_type: str = Form("auto"),
+    request: Request, file: UploadFile = File(...), document_type: str = Form("auto"),
     nvd_api_key: str | None = Form(None), llm_base_url: str | None = Form(None),
     llm_api_key: str | None = Form(None), llm_model: str = Form("gpt-4.1-mini"),
     scan_engine: str = Form("auto"), scan_container_images: bool = Form(False),
@@ -263,7 +276,7 @@ async def scan(
             item.vulnerabilities.sort(key=lambda vuln: (not vuln.kev, SEVERITY_ORDER.get(vuln.severity, 4), -(vuln.epss or 0), vuln.id))
     elif requested_trivy:
         warnings.append("Trivy is not installed; the scan completed with OSV/NVD only")
-    local_matches = apply_custom_advisories(results, database.list_custom_advisories())
+    local_matches = apply_custom_advisories(results, database.list_custom_advisories(request.state.owner_id))
     if local_matches:
         engines.append("LocalIntel")
         for item in results:
@@ -302,13 +315,13 @@ async def scan(
                 scan_result.ai_summary = await create_ai_summary(scan_result, llm_base_url, llm_api_key, llm_model)
             except (httpx.HTTPError, KeyError, IndexError, TypeError) as exc:
                 scan_result.ai_summary = f"AI summary failed ({type(exc).__name__}); vulnerability results are unaffected."
-    database.save_scan(scan_result)
+    database.save_scan(scan_result, request.state.owner_id)
     return scan_result
 
 
 @app.get("/api/report/{scan_id}", response_class=PlainTextResponse)
-async def report(scan_id: str) -> PlainTextResponse:
-    result = database.get_scan(scan_id)
+async def report(scan_id: str, request: Request) -> PlainTextResponse:
+    result = database.get_scan(scan_id, request.state.owner_id)
     if not result:
         raise HTTPException(404, "Scan result not found")
     safe_name = re.sub(r"[^a-zA-Z0-9._-]", "_", Path(result.document_name).stem)
