@@ -23,8 +23,13 @@ def test_markdown_report_contains_risk_signals():
     report = markdown_report(scan)
     assert "CVE-2026-0001" in report
     assert "pkg:pypi/demo@1.0" in report
-    assert "In-scope vulnerable components: 1" in report
+    assert "范围内风险组件 | 1" in report
     assert "80.00%" in report
     assert "GHSA-demo" in report
-    assert "Emerging Threat Intelligence (Unverified)" in report
+    assert "新兴威胁情报（未验证）" in report
     assert "https://security.example/advisory" in report
+    assert "## 2. 风险概览与处置优先级" in report
+    assert "## 3. 已匹配漏洞详情" in report
+    assert "## 5. SBOM 完整性与未命中边界" in report
+    assert "## 7. 推荐实施顺序" in report
+    assert "P0" in report

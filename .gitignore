@@ -9,3 +9,4 @@ server.*.log
 .bomlens-review/
 .osv-scanner-review/
 .dependency-track-review/
+SBOM-vulnerability-scan-report.md
