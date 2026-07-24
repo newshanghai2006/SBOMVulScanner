@@ -23,6 +23,7 @@ from .scanner import SEVERITY_ORDER, enrich_risk, scan_components
 from .sbom_generator import (
     MAX_ARCHIVE_SIZE,
     GenerationError,
+    GitAuthenticationRequired,
     clone_repository,
     extract_zip,
     generate_sbom,
@@ -36,7 +37,7 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 MAX_FILE_SIZE = 5 * 1024 * 1024
 
 database.initialize()
-app = FastAPI(title="SBOM Scan", version="2.4.0")
+app = FastAPI(title="SBOM Scan", version="2.4.1")
 
 
 def _purl_base(purl: str) -> str:
@@ -159,6 +160,8 @@ async def remove_scan(scan_id: str) -> Response:
 async def create_sbom(
     source_zip: UploadFile | None = File(None),
     git_command: str | None = Form(None),
+    git_username: str | None = Form(None),
+    git_password: str | None = Form(None),
     output_format: str = Form("cyclonedx"),
 ) -> Response:
     has_zip = bool(source_zip and source_zip.filename)
@@ -183,9 +186,17 @@ async def create_sbom(
                 source_name = Path(source_zip.filename or "source").stem
             else:
                 git_source = parse_git_clone(command)
-                await clone_repository(git_source, source_dir)
+                username = (git_username or "").strip() or None
+                password = git_password or None
+                if username and len(username) > 200:
+                    raise HTTPException(400, "Git username is too long")
+                if password and len(password) > 2000:
+                    raise HTTPException(400, "Git password or token is too long")
+                await clone_repository(git_source, source_dir, username, password)
                 source_name = Path(git_source.url.rstrip("/").rsplit("/", 1)[-1]).stem
             document = await generate_sbom(source_dir, output_format)
+    except GitAuthenticationRequired as exc:
+        raise HTTPException(401, str(exc)) from exc
     except GenerationError as exc:
         raise HTTPException(400, str(exc)) from exc
 

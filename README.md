@@ -52,6 +52,8 @@
 
 Git 命令只接受 `-b/--branch` 和 `--single-branch`，不接受目标目录或其他 Git 参数。服务端不会通过 shell 执行输入，而是强制浅克隆到随机临时目录。ZIP 路径穿越和符号链接会被拒绝；Git 元数据会在分析前删除。请求完成后，上传内容、仓库工作区和生成文件都会从服务端临时目录删除。
 
+粘贴 Git 命令时，页面只读取纯文本并限制为 4,096 个字符。程序会先执行严格的非交互匿名克隆，禁用服务器全局 Git credential helper，避免后台认证窗口导致请求长时间挂起；如果已允许的 HTTP(S) 仓库返回认证失败，浏览器会弹出认证窗口，可输入用户名和密码或 Personal Access Token。认证信息通过一次性 Git AskPass 传递，不进入 Git 命令行、仓库 URL、日志、SQLite 或报告，克隆结束后立即清除。SSH 仓库不使用浏览器认证，应为运行服务的专用账号配置只读 SSH key。
+
 可输出并下载：
 
 - CycloneDX JSON，文件名以 `.cdx.json` 结尾。
@@ -134,6 +136,16 @@ sudo firewall-cmd --reload
 ```
 
 `SBOM_GIT_ALLOWED_HOSTS` 按主机名或 IP 精确匹配，不填写时禁用所有 Git 仓库输入，但 ZIP 生成仍可使用。不要在 HTTP(S) URL 中写密码；私有仓库应为运行服务的专用普通用户配置只读 SSH key 或 Git credential helper。
+
+主机白名单与仓库认证是两层独立控制。出现 `仓库主机未被服务器管理员允许` 时，认证弹窗不会绕过该限制。例如允许 `10.180.200.18`：
+
+```bash
+cd /data/strix/sbom-scan
+./stop.sh
+SBOM_GIT_ALLOWED_HOSTS=10.180.200.18 ./start-public.sh
+```
+
+重启后再次生成：若仓库公开则直接克隆；若仓库需要 HTTP Basic、GitLab/Gitea 用户密码或访问令牌，页面会在服务器返回认证失败后弹出认证窗口。使用令牌时，“用户名”填写该 Git 平台要求的用户名，“密码或访问令牌”填写令牌。
 
 监听 `0.0.0.0` 会扩大暴露面，源码生成又会消耗 CPU、内存和网络资源。正式环境应使用 Nginx/Caddy 配置 HTTPS、身份认证、请求大小限制和访问控制，并在不再需要外部访问时删除防火墙规则。
 

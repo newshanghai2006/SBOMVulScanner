@@ -41,7 +41,7 @@
         </div>
         <div class="source-input" id="gitSourcePanel" hidden>
           <label for="gitCommand">Git clone 命令</label>
-          <textarea id="gitCommand" name="git_command" rows="3" spellcheck="false" placeholder="git clone -b release --single-branch http://git.example.com/group/project.git"></textarea>
+          <textarea id="gitCommand" name="git_command" rows="3" maxlength="4096" wrap="off" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="git clone -b release --single-branch http://git.example.com/group/project.git"></textarea>
         </div>
         <div class="action-row">
           <p>源码仅在临时目录处理，完成后自动删除</p>
@@ -158,6 +158,17 @@
       <div class="empty" id="empty" hidden>没有符合当前条件的组件</div>
     </section>
   </main>
+  <dialog class="auth-dialog" id="gitAuthDialog">
+    <form id="gitAuthForm" method="dialog">
+      <div class="auth-head"><div><p class="eyebrow">私有仓库</p><h2>Git 仓库认证</h2></div><button type="button" id="closeGitAuth" aria-label="关闭认证窗口" title="关闭">×</button></div>
+      <p class="auth-target" id="gitAuthTarget"></p>
+      <label>用户名<input id="gitUsername" type="text" maxlength="200" autocomplete="username" required></label>
+      <label>密码或访问令牌<input id="gitPassword" type="password" maxlength="2000" autocomplete="current-password" required></label>
+      <p class="auth-error" id="gitAuthError" hidden></p>
+      <div class="auth-actions"><button type="button" id="cancelGitAuth">取消</button><button class="primary" type="submit">认证并重新生成</button></div>
+      <p class="privacy">认证信息仅用于本次克隆，不写入 URL、日志、数据库或生成报告。</p>
+    </form>
+  </dialog>
   <footer>数据来自 OSV 与 NVD · 扫描结果需结合厂商公告复核</footer>
   <script src="/app.js"></script>
 </body>

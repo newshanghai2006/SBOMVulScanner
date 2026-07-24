@@ -6,6 +6,7 @@ from fastapi import Response
 from fastapi.testclient import TestClient
 
 from app.main import app
+from app.sbom_generator import GitAuthenticationRequired
 
 
 def test_no_content_routes_use_empty_response_class():
@@ -46,3 +47,17 @@ def test_generate_sbom_from_zip_returns_download(monkeypatch):
     assert response.json()["bomFormat"] == "CycloneDX"
     assert response.headers["content-disposition"] == 'attachment; filename="device-center.cdx.json"'
     assert response.headers["cache-control"] == "no-store"
+
+
+def test_git_authentication_failure_returns_401(monkeypatch):
+    async def authentication_required(*_args, **_kwargs):
+        raise GitAuthenticationRequired("仓库需要认证")
+
+    monkeypatch.setattr("app.main.clone_repository", authentication_required)
+    response = TestClient(app).post("/api/generate-sbom", data={
+        "output_format": "cyclonedx",
+        "git_command": "git clone https://git.example.com/group/project.git",
+    })
+
+    assert response.status_code == 401
+    assert response.json()["detail"] == "仓库需要认证"

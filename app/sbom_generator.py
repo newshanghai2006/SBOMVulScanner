@@ -8,6 +8,7 @@ import shlex
 import shutil
 import signal
 import stat
+import sys
 import zipfile
 from dataclasses import dataclass
 from pathlib import Path
@@ -23,6 +24,10 @@ SCP_GIT_PATTERN = re.compile(r"^[A-Za-z0-9._-]+@[A-Za-z0-9.-]+:[^\s]+$")
 
 
 class GenerationError(ValueError):
+    pass
+
+
+class GitAuthenticationRequired(GenerationError):
     pass
 
 
@@ -98,7 +103,8 @@ def ensure_git_host_allowed(source: GitSource) -> None:
     allowed = {item.strip().lower() for item in os.environ.get("SBOM_GIT_ALLOWED_HOSTS", "").split(",") if item.strip()}
     if source.host not in allowed:
         raise GenerationError(
-            f"Repository host '{source.host}' is not allowed; add it to SBOM_GIT_ALLOWED_HOSTS and restart the service"
+            f"仓库主机 '{source.host}' 未被服务器管理员允许。认证信息不能替代主机白名单；"
+            "请将该主机加入 SBOM_GIT_ALLOWED_HOSTS 后重启服务"
         )
 
 
@@ -145,13 +151,14 @@ def validate_source_tree(root: Path) -> None:
                 raise GenerationError("Source size exceeds 500 MB")
 
 
-async def _run_process(*args: str, timeout: int) -> tuple[int, bytes, bytes]:
+async def _run_process(*args: str, timeout: int, env: dict[str, str] | None = None) -> tuple[int, bytes, bytes]:
     try:
         process = await asyncio.create_subprocess_exec(
             *args,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
             start_new_session=os.name != "nt",
+            env=env,
         )
     except OSError as exc:
         raise GenerationError(f"Unable to start required command: {Path(args[0]).name}") from exc
@@ -167,17 +174,69 @@ async def _run_process(*args: str, timeout: int) -> tuple[int, bytes, bytes]:
         raise GenerationError(f"Command timed out after {timeout} seconds")
 
 
-async def clone_repository(source: GitSource, destination: Path) -> None:
+def _create_askpass(workspace: Path) -> Path:
+    script = workspace / "git-askpass.py"
+    script.write_text(
+        f"#!{sys.executable}\n"
+        "import os, sys\n"
+        "prompt = sys.argv[1].lower() if len(sys.argv) > 1 else ''\n"
+        "name = 'SBOM_SCAN_GIT_USERNAME' if 'username' in prompt else 'SBOM_SCAN_GIT_PASSWORD'\n"
+        "print(os.environ.get(name, ''))\n",
+        encoding="utf-8",
+    )
+    script.chmod(0o700)
+    return script
+
+
+def _authentication_failed(stderr: bytes) -> bool:
+    message = stderr.decode("utf-8", errors="replace").lower()
+    return any(marker in message for marker in (
+        "authentication failed", "could not read username", "terminal prompts disabled",
+        "http basic: access denied", "permission denied", "status code: 401", "error: 401",
+        "status code: 403", "error: 403", "repository not found",
+    ))
+
+
+async def clone_repository(
+    source: GitSource,
+    destination: Path,
+    username: str | None = None,
+    password: str | None = None,
+) -> None:
     ensure_git_host_allowed(source)
     git = shutil.which(os.environ.get("GIT_PATH", "git"))
     if not git:
         raise GenerationError("Git is not installed on the server")
-    args = [git, "clone", "--depth", "1", "--single-branch"]
+    credentials_supplied = bool(username or password)
+    if credentials_supplied and not (username and password):
+        raise GenerationError("仓库用户名和密码/访问令牌必须同时提供")
+    if credentials_supplied and not source.url.startswith(("http://", "https://")):
+        raise GenerationError("页面认证仅支持 HTTP(S) 仓库；SSH 仓库请配置服务账号的只读 SSH key")
+
+    args = [git, "-c", "credential.helper="]
+    askpass = _create_askpass(destination.parent)
+    environment = {
+        **os.environ,
+        "GIT_TERMINAL_PROMPT": "0",
+        "GCM_INTERACTIVE": "Never",
+        "GIT_ASKPASS": str(askpass),
+        "SBOM_SCAN_GIT_USERNAME": username or "",
+        "SBOM_SCAN_GIT_PASSWORD": password or "",
+        "LC_ALL": "C",
+    }
+    if credentials_supplied:
+        args.extend(["-c", "http.followRedirects=false"])
+    args.extend(["clone", "--depth", "1", "--single-branch"])
     if source.branch:
         args.extend(["--branch", source.branch])
     args.extend(["--", source.url, str(destination)])
-    returncode, stdout, stderr = await _run_process(*args, timeout=300)
-    del stdout, stderr
+    try:
+        returncode, stdout, stderr = await _run_process(*args, timeout=300, env=environment)
+    finally:
+        askpass.unlink(missing_ok=True)
+    del stdout
+    if returncode != 0 and _authentication_failed(stderr):
+        raise GitAuthenticationRequired("仓库需要认证，或者提供的用户名、密码/访问令牌无效")
     if returncode != 0 or not destination.exists():
         raise GenerationError("Git clone failed; verify the URL, branch, network, and service-account credentials")
     shutil.rmtree(destination / ".git", ignore_errors=True)
