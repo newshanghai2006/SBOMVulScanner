@@ -39,7 +39,7 @@ def test_clone_credentials_are_not_added_to_command_line(monkeypatch, tmp_path: 
     monkeypatch.setattr("app.sbom_generator.shutil.which", lambda _name: "/usr/bin/git")
 
     async def fake_run(*args, timeout, env=None):
-        assert timeout == 300
+        assert timeout == 900
         assert "secret-token" not in args
         assert "credential.helper=" in args
         assert env["GIT_TERMINAL_PROMPT"] == "0"

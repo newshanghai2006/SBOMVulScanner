@@ -15,9 +15,9 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 
-MAX_ARCHIVE_SIZE = 100 * 1024 * 1024
-MAX_EXTRACTED_SIZE = 500 * 1024 * 1024
-MAX_SOURCE_FILES = 20_000
+MAX_ARCHIVE_SIZE = 1000 * 1024 * 1024
+MAX_EXTRACTED_SIZE = 3000 * 1024 * 1024
+MAX_SOURCE_FILES = 100_000
 MAX_SBOM_SIZE = 100 * 1024 * 1024
 BRANCH_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$")
 SCP_GIT_PATTERN = re.compile(r"^[A-Za-z0-9._-]+@[A-Za-z0-9.-]+:[^\s]+$")
@@ -122,7 +122,7 @@ def extract_zip(archive: Path, destination: Path) -> None:
                     raise GenerationError("ZIP symbolic links are not allowed")
                 total_size += member.file_size
                 if total_size > MAX_EXTRACTED_SIZE:
-                    raise GenerationError("ZIP extracted size exceeds 500 MB")
+                    raise GenerationError("ZIP extracted size exceeds 3000 MB")
                 target = (destination / member.filename).resolve()
                 if target != root and root not in target.parents:
                     raise GenerationError("ZIP contains a path outside its root")
@@ -148,7 +148,7 @@ def validate_source_tree(root: Path) -> None:
             if count > MAX_SOURCE_FILES:
                 raise GenerationError(f"Source contains more than {MAX_SOURCE_FILES} files")
             if total_size > MAX_EXTRACTED_SIZE:
-                raise GenerationError("Source size exceeds 500 MB")
+                raise GenerationError("Source size exceeds 3000 MB")
 
 
 async def _run_process(*args: str, timeout: int, env: dict[str, str] | None = None) -> tuple[int, bytes, bytes]:
@@ -231,7 +231,7 @@ async def clone_repository(
         args.extend(["--branch", source.branch])
     args.extend(["--", source.url, str(destination)])
     try:
-        returncode, stdout, stderr = await _run_process(*args, timeout=300, env=environment)
+        returncode, stdout, stderr = await _run_process(*args, timeout=900, env=environment)
     finally:
         askpass.unlink(missing_ok=True)
     del stdout
@@ -243,7 +243,7 @@ async def clone_repository(
     validate_source_tree(destination)
 
 
-async def generate_sbom(source: Path, output_format: str) -> bytes:
+async def generate_sbom(source: Path, output_format: str) -> tuple[bytes, int]:
     formats = {"cyclonedx": "cyclonedx-json", "spdx": "spdx-json"}
     if output_format not in formats:
         raise GenerationError("Output format must be cyclonedx or spdx")
@@ -251,7 +251,7 @@ async def generate_sbom(source: Path, output_format: str) -> bytes:
     if not syft:
         raise GenerationError("Syft is not installed on the server")
     returncode, stdout, stderr = await _run_process(
-        syft, "scan", f"dir:{source}", "--output", formats[output_format], "--quiet", timeout=600,
+        syft, "scan", f"dir:{source}", "--output", formats[output_format], "--quiet", timeout=1800,
     )
     if returncode != 0 or not stdout:
         del stderr
@@ -266,4 +266,6 @@ async def generate_sbom(source: Path, output_format: str) -> bytes:
         raise GenerationError("Syft did not return a CycloneDX document")
     if output_format == "spdx" and not str(document.get("spdxVersion", "")).startswith("SPDX-"):
         raise GenerationError("Syft did not return an SPDX document")
-    return json.dumps(document, ensure_ascii=False, indent=2).encode("utf-8")
+    component_key = "components" if output_format == "cyclonedx" else "packages"
+    component_count = len(document.get(component_key) or [])
+    return json.dumps(document, ensure_ascii=False, indent=2).encode("utf-8"), component_count

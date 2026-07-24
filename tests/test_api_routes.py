@@ -27,7 +27,7 @@ def test_frontend_assets_disable_browser_cache():
 
     assert page.headers["cache-control"] == "no-store"
     assert script.headers["cache-control"] == "no-store"
-    assert "/app.js?v=2.4.2" in page.text
+    assert "/app.js?v=2.5.0" in page.text
 
 
 def test_generate_sbom_requires_exactly_one_source():
@@ -44,7 +44,7 @@ def test_generate_sbom_from_zip_returns_download(monkeypatch):
 
     async def fake_generate(_source, output_format):
         assert output_format == "cyclonedx"
-        return json.dumps({"bomFormat": "CycloneDX", "components": []}).encode()
+        return json.dumps({"bomFormat": "CycloneDX", "components": []}).encode(), 0
 
     monkeypatch.setattr("app.main.generate_sbom", fake_generate)
     response = TestClient(app).post(
@@ -57,6 +57,8 @@ def test_generate_sbom_from_zip_returns_download(monkeypatch):
     assert response.json()["bomFormat"] == "CycloneDX"
     assert response.headers["content-disposition"] == 'attachment; filename="device-center.cdx.json"'
     assert response.headers["cache-control"] == "no-store"
+    assert response.headers["x-sbom-format"] == "cyclonedx"
+    assert response.headers["x-sbom-component-count"] == "0"
 
 
 def test_git_authentication_failure_returns_401(monkeypatch):

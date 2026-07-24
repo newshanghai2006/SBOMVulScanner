@@ -34,10 +34,10 @@ from . import trivy
 from .threat_intel import search_emerging_threats
 
 BASE_DIR = Path(__file__).resolve().parent.parent
-MAX_FILE_SIZE = 5 * 1024 * 1024
+MAX_FILE_SIZE = 100 * 1024 * 1024
 
 database.initialize()
-app = FastAPI(title="SBOM Scan", version="2.4.2")
+app = FastAPI(title="SBOM Scan", version="2.5.0")
 
 
 @app.middleware("http")
@@ -50,6 +50,17 @@ async def disable_frontend_cache(request: Request, call_next):
 
 def _purl_base(purl: str) -> str:
     return purl.rsplit("@", 1)[0].lower()
+
+
+async def _save_upload(upload: UploadFile, target: Path, limit: int) -> int:
+    size = 0
+    with target.open("wb") as output:
+        while chunk := await upload.read(1024 * 1024):
+            size += len(chunk)
+            if size > limit:
+                raise HTTPException(413, "Source ZIP must not exceed 1000 MB")
+            output.write(chunk)
+    return size
 
 
 def apply_custom_advisories(results, advisories: list[CustomAdvisory]) -> int:
@@ -184,11 +195,8 @@ async def create_sbom(
             workspace = Path(temp_name)
             source_dir = workspace / "source"
             if has_zip and source_zip:
-                content = await source_zip.read(MAX_ARCHIVE_SIZE + 1)
-                if len(content) > MAX_ARCHIVE_SIZE:
-                    raise HTTPException(413, "Source ZIP must not exceed 100 MB")
                 archive_path = workspace / "source.zip"
-                archive_path.write_bytes(content)
+                await _save_upload(source_zip, archive_path, MAX_ARCHIVE_SIZE)
                 await asyncio.to_thread(extract_zip, archive_path, source_dir)
                 await asyncio.to_thread(validate_source_tree, source_dir)
                 source_name = Path(source_zip.filename or "source").stem
@@ -202,7 +210,7 @@ async def create_sbom(
                     raise HTTPException(400, "Git password or token is too long")
                 await clone_repository(git_source, source_dir, username, password)
                 source_name = Path(git_source.url.rstrip("/").rsplit("/", 1)[-1]).stem
-            document = await generate_sbom(source_dir, output_format)
+            document, component_count = await generate_sbom(source_dir, output_format)
     except GitAuthenticationRequired as exc:
         raise HTTPException(401, str(exc)) from exc
     except GenerationError as exc:
@@ -213,6 +221,8 @@ async def create_sbom(
     return Response(document, media_type="application/json", headers={
         "Content-Disposition": f'attachment; filename="{safe_name}.{suffix}"',
         "Cache-Control": "no-store",
+        "X-SBOM-Format": output_format,
+        "X-SBOM-Component-Count": str(component_count),
     })
 
 
@@ -227,7 +237,7 @@ async def scan(
 ) -> ScanResult:
     content = await file.read(MAX_FILE_SIZE + 1)
     if len(content) > MAX_FILE_SIZE:
-        raise HTTPException(413, "File size must not exceed 5 MB")
+        raise HTTPException(413, "File size must not exceed 100 MB")
     try:
         detected_type, components = parse_document(content, document_type)
     except DocumentError as exc:

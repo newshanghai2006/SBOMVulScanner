@@ -15,8 +15,11 @@ const escapeHtml = (value = '') => String(value).replace(/[&<>'"]/g, char => ({'
 
 function showFile(file) {
   if (!file) return;
+  const size = file.size >= 1024 * 1024
+    ? `${(file.size / 1024 / 1024).toFixed(1)} MB`
+    : `${(file.size / 1024).toFixed(1)} KB`;
   document.querySelector('#fileTitle').textContent = file.name;
-  document.querySelector('#fileMeta').textContent = `${(file.size / 1024).toFixed(1)} KB · 准备扫描`;
+  document.querySelector('#fileMeta').textContent = `${size} · 准备扫描`;
   dropzone.classList.add('has-file');
 }
 
@@ -120,6 +123,7 @@ async function generateSourceSbom() {
   const formData = new FormData(generatorForm);
   formData.delete('source_mode');
   formData.delete('repository_access');
+  const requestedFormat = formData.get('output_format');
   const attemptedAuthentication = Boolean(gitCredentials);
   if (gitCredentials) {
     formData.set('git_username', gitCredentials.username);
@@ -137,16 +141,24 @@ async function generateSourceSbom() {
       throw new Error(data.detail || 'SBOM 生成失败');
     }
     const blob = await response.blob();
-    const sbomDocument = JSON.parse(await blob.text());
-    const isCycloneDx = sbomDocument.bomFormat === 'CycloneDX';
-    const count = isCycloneDx ? (sbomDocument.components || []).length : (sbomDocument.packages || []).length;
+    const generatedFormat = response.headers.get('X-SBOM-Format') || requestedFormat;
+    const isCycloneDx = generatedFormat === 'cyclonedx';
+    const count = response.headers.get('X-SBOM-Component-Count') || '未知数量';
     const format = isCycloneDx ? 'CycloneDX' : 'SPDX';
+    const filename = downloadFilename(response, `source.${isCycloneDx ? 'cdx' : 'spdx'}.json`);
     if (generatedSbomUrl) URL.revokeObjectURL(generatedSbomUrl);
     generatedSbomUrl = URL.createObjectURL(blob);
     const download = document.querySelector('#downloadSbom');
-    download.href = generatedSbomUrl; download.download = downloadFilename(response, `source.${isCycloneDx ? 'cdx' : 'spdx'}.json`);
-    document.querySelector('#generatedSummary').textContent = `${format} JSON · ${count} 个组件`;
+    download.href = generatedSbomUrl; download.download = filename;
+    const generatedFile = new File([blob], filename, {type: 'application/json', lastModified: Date.now()});
+    const transfer = new DataTransfer();
+    transfer.items.add(generatedFile);
+    input.files = transfer.files;
+    showFile(generatedFile);
+    document.querySelector(`input[name="document_type"][value="${generatedFormat}"]`).checked = true;
+    document.querySelector('#generatedSummary').textContent = `${format} JSON · ${count} 个组件 · 已放入扫描清单`;
     document.querySelector('#generatorResult').hidden = false;
+    requestAnimationFrame(() => document.querySelector('#scanPanel').scrollIntoView({behavior: 'smooth', block: 'start'}));
   } catch (error) {
     generatorError.textContent = error.message; generatorError.hidden = false;
   } finally {

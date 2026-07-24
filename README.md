@@ -47,7 +47,7 @@
 
 源码生成是漏洞扫描前的独立步骤，使用 Syft 分析依赖清单和软件包元数据，不需要 LLM Base URL、API Key 或模型。支持以下输入：
 
-- 不超过 100 MB 的源码 ZIP；解压后最多 20,000 个文件、500 MB。
+- 不超过 1000 MB 的源码 ZIP；解压后最多 100,000 个文件、3000 MB。
 - 受控的 `git clone` 命令，例如 `git clone -b release --single-branch http://10.1.1.1:3000/group/project.git`。
 
 Git 命令只接受 `-b/--branch` 和 `--single-branch`，不接受目标目录或其他 Git 参数。服务端不会通过 shell 执行输入，而是强制浅克隆到随机临时目录。ZIP 路径穿越和符号链接会被拒绝；Git 元数据会在分析前删除。请求完成后，上传内容、仓库工作区和生成文件都会从服务端临时目录删除。
@@ -59,7 +59,9 @@ Git 命令只接受 `-b/--branch` 和 `--single-branch`，不接受目标目录�
 - CycloneDX JSON，文件名以 `.cdx.json` 结尾。
 - SPDX JSON，文件名以 `.spdx.json` 结尾。
 
-下载后可在页面下方“选择清单”中上传该文件，继续执行原有漏洞扫描。
+生成成功后，页面会把 SBOM 自动放入下方“选择清单”，自动选择 CycloneDX/SPDX 类型并滚动到扫描区域，可以直接点击“开始扫描”，无需先下载再重新上传。生成结果的“下载 SBOM”按钮仍然保留。
+
+ZIP 采用分块方式写入临时文件，不会一次性把整个 1000 MB 上传内容读入 Python 内存。生成期间需要同时容纳压缩包、最多 3000 MB 的源码目录和 Syft 输出，建议临时磁盘至少保留 5 GB 可用空间。Git 克隆最长等待 15 分钟，Syft 分析最长等待 30 分钟。
 
 ## openEuler 24.03 安装与运行
 
@@ -147,7 +149,7 @@ SBOM_GIT_ALLOWED_HOSTS=10.1.1.1 ./start-public.sh
 
 重启后再次生成：在 Git 输入区选择“私有仓库”，页面会立即弹出认证窗口。使用令牌时，“用户名”填写该 Git 平台要求的用户名，“密码或访问令牌”填写令牌。认证页面应通过 HTTPS 或本机 SSH 隧道访问，避免凭据在网络中明文传输。
 
-监听 `0.0.0.0` 会扩大暴露面，源码生成又会消耗 CPU、内存和网络资源。正式环境应使用 Nginx/Caddy 配置 HTTPS、身份认证、请求大小限制和访问控制，并在不再需要外部访问时删除防火墙规则。
+监听 `0.0.0.0` 会扩大暴露面，源码生成又会消耗 CPU、内存和网络资源。正式环境应使用 Nginx/Caddy 配置 HTTPS、身份认证、请求大小限制和访问控制，并在不再需要外部访问时删除防火墙规则。若使用 Nginx，需将 `client_max_body_size` 配置为至少 `1000m`，否则请求会在到达程序前被 Nginx 拒绝。
 
 ## Windows 安装
 
@@ -283,8 +285,8 @@ printf '%s' "$REGISTRY_PASSWORD" | trivy registry login \
 
 1. 打开 Web 页面。
 2. 选择自动识别、CycloneDX、SPDX 或 HBOM。
-3. 上传不超过 5 MB 的 JSON 文件。
-4. 按需展开高级配置，选择扫描引擎、容器扫描、NVD key 或 LLM。
+3. 上传不超过 100 MB 的 JSON 文件；从源码生成的 SBOM 会自动进入此选择清单。
+4. 高级配置始终显示，可按需选择扫描引擎、容器扫描、NVD key 或 LLM。
 5. 扫描后按风险状态或 Excluded scope 筛选，并下载 Markdown 报告。
 6. 最近扫描保存在本机，可以重新打开或删除。
 
