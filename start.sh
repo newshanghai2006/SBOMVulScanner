@@ -9,6 +9,10 @@ STDOUT_LOG="$DATA_DIR/server.out.log"
 STDERR_LOG="$DATA_DIR/server.err.log"
 HOST=${HOST:-127.0.0.1}
 PORT=${PORT:-8088}
+CHECK_HOST=$HOST
+case "$CHECK_HOST" in
+    0.0.0.0|::|"[::]") CHECK_HOST=127.0.0.1 ;;
+esac
 
 mkdir -p "$DATA_DIR"
 
@@ -56,7 +60,7 @@ COUNT=0
 while [ "$COUNT" -lt 20 ]; do
     sleep 0.5
     if ! kill -0 "$PID" 2>/dev/null; then break; fi
-    if "$PYTHON" - "$HOST" "$PORT" <<'PY' 2>/dev/null
+    if "$PYTHON" - "$CHECK_HOST" "$PORT" <<'PY' 2>/dev/null
 import json, sys, urllib.request
 data = json.load(urllib.request.urlopen(f"http://{sys.argv[1]}:{sys.argv[2]}/api/health", timeout=2))
 raise SystemExit(0 if data.get("status") == "ok" else 1)

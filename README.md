@@ -174,6 +174,8 @@ SBOM_GIT_ALLOWED_HOSTS=10.1.1.1 ./start-public.sh
 
 监听 `0.0.0.0` 会扩大暴露面，源码生成又会消耗 CPU、内存和网络资源。正式环境应使用 Nginx/Caddy 配置 HTTPS、身份认证、请求大小限制和访问控制，并在不再需要外部访问时删除防火墙规则。若使用 Nginx，需将 `client_max_body_size` 配置为至少 `1000m`，否则请求会在到达程序前被 Nginx 拒绝。
 
+`start-public.sh` 监听 `0.0.0.0:8088`，启动脚本会使用 `127.0.0.1:8088` 执行本机健康检查，不会把 `0.0.0.0` 当作客户端访问地址。
+
 ## Windows 安装
 
 在 PowerShell 中安装依赖：
