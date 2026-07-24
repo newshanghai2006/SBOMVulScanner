@@ -285,6 +285,23 @@ export TRIVY_PATH=/opt/trivy/bin/trivy
 ./start.sh
 ```
 
+Trivy 进程默认允许运行 900 秒，支持通过环境变量调整为 60 到 3600 秒：
+
+```bash
+export TRIVY_TIMEOUT_SECONDS=1800
+./stop.sh
+./start.sh
+```
+
+首次运行或长期未更新时，Trivy 可能需要先下载漏洞数据库。建议在正式扫描前预热数据库：
+
+```bash
+trivy image --download-db-only
+trivy version
+```
+
+如果服务器没有外网或需要代理，请在同一运行用户环境中设置 `HTTPS_PROXY` 后执行数据库预热和启动脚本。出现超时告警时，OSV/NVD 结果仍会保留；也可以在高级配置中暂时选择“仅 OSV / NVD”，跳过 Trivy。
+
 ## 扫描引擎
 
 高级配置中可以选择：

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import math
 import os
 import re
 import shutil
@@ -17,6 +18,14 @@ IMAGE_REF = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._/:@-]{0,499}$")
 
 def available() -> bool:
     return shutil.which(os.environ.get("TRIVY_PATH", "trivy")) is not None
+
+
+def configured_timeout() -> int:
+    try:
+        value = int(os.environ.get("TRIVY_TIMEOUT_SECONDS", "900"))
+    except ValueError:
+        value = 900
+    return min(max(value, 60), 3600)
 
 
 def _trivy_score(item: dict[str, Any]) -> float | None:
@@ -64,7 +73,8 @@ def parse_report(report: dict[str, Any], components: list[Component], container:
     return findings
 
 
-async def _run_trivy(*args: str, timeout: int = 360) -> tuple[dict[str, Any] | None, str | None]:
+async def _run_trivy(*args: str, timeout: int | None = None) -> tuple[dict[str, Any] | None, str | None]:
+    timeout = configured_timeout() if timeout is None else timeout
     binary = os.environ.get("TRIVY_PATH", "trivy")
     try:
         process = await asyncio.create_subprocess_exec(
@@ -92,12 +102,13 @@ async def scan(content: bytes, components: list[Component], scan_images: bool) -
     findings: list[tuple[Component, Vulnerability]] = []
     warnings: list[str] = []
     scanned_containers: list[Component] = []
+    timeout = configured_timeout()
     path = ""
     try:
         with tempfile.NamedTemporaryFile(suffix=".cdx.json", delete=False) as temp:
             temp.write(content)
             path = temp.name
-        report, error = await _run_trivy("sbom", "--scanners", "vuln", "--format", "json", "--quiet", path)
+        report, error = await _run_trivy("sbom", "--scanners", "vuln", "--format", "json", "--quiet", path, timeout=timeout)
         if report:
             findings.extend(parse_report(report, components))
         if error:
@@ -115,7 +126,10 @@ async def scan(content: bytes, components: list[Component], scan_images: bool) -
             if not IMAGE_REF.fullmatch(reference):
                 warnings.append(f"Skipped invalid container reference: {reference[:100]}")
                 continue
-            report, error = await _run_trivy("image", "--scanners", "vuln", "--format", "json", "--quiet", "--timeout", "5m", reference)
+            report, error = await _run_trivy(
+                "image", "--scanners", "vuln", "--format", "json", "--quiet",
+                "--timeout", f"{max(5, math.ceil(timeout / 60))}m", reference, timeout=timeout,
+            )
             if report:
                 findings.extend(parse_report(report, components, container=component))
                 scanned_containers.append(component)

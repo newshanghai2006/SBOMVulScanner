@@ -1,5 +1,5 @@
 from app.models import Component, ComponentResult
-from app.trivy import merge_findings, parse_report
+from app.trivy import configured_timeout, merge_findings, parse_report
 
 
 def test_trivy_report_maps_purl_to_component():
@@ -15,3 +15,12 @@ def test_trivy_report_maps_purl_to_component():
     assert result.status == "vulnerable"
     assert result.vulnerabilities[0].score == 8.1
     assert result.vulnerabilities[0].fixed_version == "1.1"
+
+
+def test_trivy_timeout_is_configurable_and_bounded(monkeypatch):
+    monkeypatch.setenv("TRIVY_TIMEOUT_SECONDS", "1800")
+    assert configured_timeout() == 1800
+    monkeypatch.setenv("TRIVY_TIMEOUT_SECONDS", "not-a-number")
+    assert configured_timeout() == 900
+    monkeypatch.setenv("TRIVY_TIMEOUT_SECONDS", "99999")
+    assert configured_timeout() == 3600
