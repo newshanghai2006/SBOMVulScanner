@@ -20,6 +20,16 @@ def test_no_content_routes_use_empty_response_class():
     assert routes["/api/scans/{scan_id}"].response_class is Response
 
 
+def test_frontend_assets_disable_browser_cache():
+    client = TestClient(app)
+    page = client.get("/")
+    script = client.get("/app.js")
+
+    assert page.headers["cache-control"] == "no-store"
+    assert script.headers["cache-control"] == "no-store"
+    assert "/app.js?v=2.4.2" in page.text
+
+
 def test_generate_sbom_requires_exactly_one_source():
     response = TestClient(app).post("/api/generate-sbom", data={"output_format": "cyclonedx"})
 

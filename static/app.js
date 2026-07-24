@@ -37,6 +37,42 @@ const generateButton = document.querySelector('#generateButton');
 const gitAuthDialog = document.querySelector('#gitAuthDialog');
 const gitAuthForm = document.querySelector('#gitAuthForm');
 let gitCredentials = null;
+let generateAfterAuthentication = false;
+
+function repositoryAccess() {
+  return document.querySelector('input[name="repository_access"]:checked').value;
+}
+
+function updateGitCredentialStatus() {
+  const isPrivate = repositoryAccess() === 'private';
+  document.querySelector('#editGitAuth').hidden = !isPrivate;
+  document.querySelector('#gitCredentialStatus').textContent = !isPrivate
+    ? '匿名访问'
+    : gitCredentials ? `已设置：${gitCredentials.username}` : '需要认证 · 尚未设置';
+}
+
+function clearGitCredentials() {
+  gitCredentials = null;
+  document.querySelector('#gitPassword').value = '';
+  updateGitCredentialStatus();
+}
+
+function selectRepositoryAccess(value) {
+  document.querySelector(`input[name="repository_access"][value="${value}"]`).checked = true;
+  if (value === 'public') clearGitCredentials(); else updateGitCredentialStatus();
+}
+
+function openGitAuthentication({generateAfter = false, error = ''} = {}) {
+  generateAfterAuthentication = generateAfter;
+  document.querySelector('#gitAuthTarget').textContent = gitCommand.value.trim() || '尚未输入 Git clone 命令';
+  document.querySelector('#gitAuthError').textContent = error;
+  document.querySelector('#gitAuthError').hidden = !error;
+  document.querySelector('#saveGitAuth').textContent = generateAfter ? '认证并生成' : '保存认证';
+  const secureTransport = location.protocol === 'https:' || ['localhost', '127.0.0.1', '::1'].includes(location.hostname);
+  document.querySelector('#gitTransportWarning').hidden = secureTransport;
+  if (!gitAuthDialog.open) gitAuthDialog.showModal();
+  document.querySelector('#gitUsername').focus();
+}
 
 document.querySelectorAll('input[name="source_mode"]').forEach(radio => radio.addEventListener('change', () => {
   const isZip = document.querySelector('input[name="source_mode"]:checked').value === 'zip';
@@ -44,7 +80,7 @@ document.querySelectorAll('input[name="source_mode"]').forEach(radio => radio.ad
   document.querySelector('#gitSourcePanel').hidden = isZip;
   sourceZipInput.required = isZip;
   gitCommand.required = !isZip;
-  gitCredentials = null;
+  selectRepositoryAccess('public');
   if (isZip) gitCommand.value = ''; else sourceZipInput.value = '';
 }));
 sourceZipInput.required = true;
@@ -62,6 +98,15 @@ gitCommand.addEventListener('paste', event => {
   }
   gitCommand.setRangeText(normalized, gitCommand.selectionStart, gitCommand.selectionEnd, 'end');
 });
+document.querySelectorAll('input[name="repository_access"]').forEach(radio => radio.addEventListener('change', () => {
+  if (repositoryAccess() === 'private') {
+    updateGitCredentialStatus();
+    openGitAuthentication();
+  } else {
+    clearGitCredentials();
+  }
+}));
+document.querySelector('#editGitAuth').addEventListener('click', () => openGitAuthentication());
 
 function downloadFilename(response, fallback) {
   const match = (response.headers.get('Content-Disposition') || '').match(/filename="([^"]+)"/i);
@@ -74,6 +119,8 @@ async function generateSourceSbom() {
   generateButton.querySelector('span').textContent = '正在分析源码';
   const formData = new FormData(generatorForm);
   formData.delete('source_mode');
+  formData.delete('repository_access');
+  const attemptedAuthentication = Boolean(gitCredentials);
   if (gitCredentials) {
     formData.set('git_username', gitCredentials.username);
     formData.set('git_password', gitCredentials.password);
@@ -83,13 +130,8 @@ async function generateSourceSbom() {
     if (!response.ok) {
       const data = await response.json();
       if (response.status === 401 && document.querySelector('input[name="source_mode"]:checked').value === 'git') {
-        const attemptedAuthentication = Boolean(gitCredentials);
-        document.querySelector('#gitAuthTarget').textContent = gitCommand.value;
-        document.querySelector('#gitAuthError').textContent = data.detail || '仓库认证失败';
-        document.querySelector('#gitAuthError').hidden = !attemptedAuthentication;
-        document.querySelector('#gitPassword').value = '';
-        gitCredentials = null;
-        gitAuthDialog.showModal();
+        selectRepositoryAccess('private');
+        openGitAuthentication({generateAfter: true, error: attemptedAuthentication ? (data.detail || '仓库认证失败') : ''});
         return;
       }
       throw new Error(data.detail || 'SBOM 生成失败');
@@ -105,17 +147,22 @@ async function generateSourceSbom() {
     download.href = generatedSbomUrl; download.download = downloadFilename(response, `source.${isCycloneDx ? 'cdx' : 'spdx'}.json`);
     document.querySelector('#generatedSummary').textContent = `${format} JSON · ${count} 个组件`;
     document.querySelector('#generatorResult').hidden = false;
-    gitCredentials = null;
   } catch (error) {
     generatorError.textContent = error.message; generatorError.hidden = false;
   } finally {
+    if (attemptedAuthentication) clearGitCredentials();
     generatorProgress.hidden = true; generateButton.disabled = false; generateButton.querySelector('span').textContent = '生成 SBOM';
   }
 }
 
 generatorForm.addEventListener('submit', event => {
   event.preventDefault();
-  gitCredentials = null;
+  const isGit = document.querySelector('input[name="source_mode"]:checked').value === 'git';
+  if (isGit && repositoryAccess() === 'private' && !gitCredentials) {
+    openGitAuthentication({generateAfter: true});
+    return;
+  }
+  if (isGit && repositoryAccess() === 'public') clearGitCredentials();
   generateSourceSbom();
 });
 
@@ -127,15 +174,19 @@ gitAuthForm.addEventListener('submit', event => {
   };
   if (!gitCredentials.username || !gitCredentials.password) return;
   document.querySelector('#gitPassword').value = '';
+  updateGitCredentialStatus();
+  const shouldGenerate = generateAfterAuthentication;
+  generateAfterAuthentication = false;
   gitAuthDialog.close();
-  generateSourceSbom();
+  if (shouldGenerate) generateSourceSbom();
 });
 ['#closeGitAuth', '#cancelGitAuth'].forEach(selector => document.querySelector(selector).addEventListener('click', () => {
-  gitCredentials = null; document.querySelector('#gitPassword').value = ''; gitAuthDialog.close();
+  generateAfterAuthentication = false; document.querySelector('#gitPassword').value = ''; gitAuthDialog.close();
 }));
 gitAuthDialog.addEventListener('cancel', () => {
-  gitCredentials = null; document.querySelector('#gitPassword').value = '';
+  generateAfterAuthentication = false; document.querySelector('#gitPassword').value = '';
 });
+updateGitCredentialStatus();
 
 form.addEventListener('submit', async event => {
   event.preventDefault();

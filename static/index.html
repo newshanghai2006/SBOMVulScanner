@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="description" content="SBOM 与 HBOM 已知漏洞匹配工作台">
   <title>SBOM Scan</title>
-  <link rel="stylesheet" href="/styles.css">
+  <link rel="stylesheet" href="/styles.css?v=2.4.2">
 </head>
 <body>
   <header class="topbar">
@@ -42,6 +42,14 @@
         <div class="source-input" id="gitSourcePanel" hidden>
           <label for="gitCommand">Git clone 命令</label>
           <textarea id="gitCommand" name="git_command" rows="3" maxlength="4096" wrap="off" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="git clone -b release --single-branch http://git.example.com/group/project.git"></textarea>
+          <div class="git-access">
+            <div class="segmented" role="radiogroup" aria-label="仓库访问方式">
+              <label><input type="radio" name="repository_access" value="public" checked><span>公开仓库</span></label>
+              <label><input type="radio" name="repository_access" value="private"><span>私有仓库</span></label>
+            </div>
+            <span id="gitCredentialStatus">匿名访问</span>
+            <button type="button" id="editGitAuth" hidden>设置认证</button>
+          </div>
         </div>
         <div class="action-row">
           <p>源码仅在临时目录处理，完成后自动删除</p>
@@ -164,12 +172,13 @@
       <p class="auth-target" id="gitAuthTarget"></p>
       <label>用户名<input id="gitUsername" type="text" maxlength="200" autocomplete="username" required></label>
       <label>密码或访问令牌<input id="gitPassword" type="password" maxlength="2000" autocomplete="current-password" required></label>
+      <p class="transport-warning" id="gitTransportWarning" hidden>当前页面未使用 HTTPS，认证信息可能在网络传输中被截获。</p>
       <p class="auth-error" id="gitAuthError" hidden></p>
-      <div class="auth-actions"><button type="button" id="cancelGitAuth">取消</button><button class="primary" type="submit">认证并重新生成</button></div>
+      <div class="auth-actions"><button type="button" id="cancelGitAuth">取消</button><button class="primary" id="saveGitAuth" type="submit">保存认证</button></div>
       <p class="privacy">认证信息仅用于本次克隆，不写入 URL、日志、数据库或生成报告。</p>
     </form>
   </dialog>
   <footer>数据来自 OSV 与 NVD · 扫描结果需结合厂商公告复核</footer>
-  <script src="/app.js"></script>
+  <script src="/app.js?v=2.4.2"></script>
 </body>
 </html>

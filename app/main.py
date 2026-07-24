@@ -11,7 +11,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import httpx
-from fastapi import FastAPI, File, Form, HTTPException, Response, UploadFile
+from fastapi import FastAPI, File, Form, HTTPException, Request, Response, UploadFile
 from fastapi.responses import PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 
@@ -37,7 +37,15 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 MAX_FILE_SIZE = 5 * 1024 * 1024
 
 database.initialize()
-app = FastAPI(title="SBOM Scan", version="2.4.1")
+app = FastAPI(title="SBOM Scan", version="2.4.2")
+
+
+@app.middleware("http")
+async def disable_frontend_cache(request: Request, call_next):
+    response = await call_next(request)
+    if request.url.path in {"/", "/index.html", "/app.js", "/styles.css"}:
+        response.headers["Cache-Control"] = "no-store"
+    return response
 
 
 def _purl_base(purl: str) -> str:
