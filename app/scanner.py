@@ -16,11 +16,29 @@ NVD_URL = "https://services.nvd.nist.gov/rest/json/cves/2.0"
 EPSS_URL = "https://api.first.org/data/v1/epss"
 KEV_URL = "https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json"
 SEVERITY_ORDER = {"CRITICAL": 0, "HIGH": 1, "MEDIUM": 2, "LOW": 3, "UNKNOWN": 4}
+RETRYABLE_STATUS_CODES = {429, 500, 502, 503, 504}
+RETRYABLE_ERRORS = (httpx.ConnectError, httpx.ConnectTimeout, httpx.ReadError, httpx.ReadTimeout, httpx.RemoteProtocolError)
 
 
 def _chunks(items: list[str], size: int) -> Iterable[list[str]]:
     for index in range(0, len(items), size):
         yield items[index:index + size]
+
+
+async def _request_with_retry(client: httpx.AsyncClient, method: str, url: str, **kwargs) -> httpx.Response:
+    last_response: httpx.Response | None = None
+    for attempt, delay in enumerate((0.5, 1.0, 2.0, 0.0)):
+        try:
+            response = await client.request(method, url, **kwargs)
+            last_response = response
+            if response.status_code not in RETRYABLE_STATUS_CODES or not delay:
+                return response
+        except RETRYABLE_ERRORS:
+            if not delay:
+                raise
+        await asyncio.sleep(delay)
+    assert last_response is not None
+    return last_response
 
 
 def _severity(score: float | None) -> str:
@@ -175,7 +193,8 @@ def _from_osv(vuln: dict[str, Any], component: Component) -> Vulnerability:
 async def scan_components(components: list[Component], nvd_api_key: str | None = None) -> list[ComponentResult]:
     headers = {"User-Agent": "SBOM-Scan/2.0"}
     limits = httpx.Limits(max_connections=12, max_keepalive_connections=6)
-    async with httpx.AsyncClient(timeout=30, headers=headers, limits=limits) as client:
+    timeout = httpx.Timeout(60.0, connect=15.0)
+    async with httpx.AsyncClient(timeout=timeout, headers=headers, limits=limits) as client:
         results: list[ComponentResult | None] = [None] * len(components)
         software_indices = [i for i, component in enumerate(components) if component.purl or (component.ecosystem and component.version)]
         nvd_indices = [i for i, component in enumerate(components) if i not in software_indices and component.cpe]
@@ -207,7 +226,7 @@ async def scan_components(components: list[Component], nvd_api_key: str | None =
 
 async def query_osv_batch(client: httpx.AsyncClient, components: list[Component]) -> list[ComponentResult]:
     try:
-        response = await client.post(OSV_BATCH_URL, json={"queries": [_osv_query(component) for component in components]})
+        response = await _request_with_retry(client, "POST", OSV_BATCH_URL, json={"queries": [_osv_query(component) for component in components]})
         response.raise_for_status()
         batch_results = response.json().get("results", [])
         if len(batch_results) != len(components):
@@ -218,7 +237,7 @@ async def query_osv_batch(client: httpx.AsyncClient, components: list[Component]
 
         async def fetch(vuln_id: str) -> tuple[str, dict[str, Any]]:
             async with semaphore:
-                detail = await client.get(OSV_VULN_URL.format(vuln_id=vuln_id))
+                detail = await _request_with_retry(client, "GET", OSV_VULN_URL.format(vuln_id=vuln_id))
                 detail.raise_for_status()
                 return vuln_id, detail.json()
 

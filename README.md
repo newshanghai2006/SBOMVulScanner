@@ -7,6 +7,7 @@
 - 支持 CycloneDX JSON 1.4+、SPDX JSON 2.x 和本项目 HBOM JSON。
 - 使用 Syft 从源码 ZIP 或受控 Git 仓库生成 CycloneDX/SPDX JSON，并直接下载。
 - 使用 CVE/GHSA/OSV 别名归并重复记录。
+- OSV 连接和 429/5xx 响应自动进行退避重试；最终失败明确标记为查询失败，不会当作干净。
 - 解析 CVSS、OSV 版本区间和与当前版本对应的最小修复版本。
 - 使用成熟的生态版本规则比较 PyPI、npm、Maven、Go、Cargo、NuGet、RubyGems、Composer、Debian、RPM 和 Alpine 版本。
 - 按 `CISA KEV -> 严重性 -> EPSS` 排序。
@@ -90,6 +91,28 @@ syft version
 ```bash
 sudo dnf install -y python3-devel gcc gcc-c++ make
 ```
+
+### OSV 网络检查
+
+OSV 是在线服务。同一个 SBOM 在不同时间可能因 DNS、出口防火墙、代理、服务端负载或临时连接抖动得到不同的可用性结果。程序现在会自动重试连接超时、读取超时、连接重置和 HTTP `429/5xx`；全部重试失败时，组件显示 `OSV query failed`，不会被判定为无漏洞。
+
+在 openEuler 服务器上检查 HTTPS 出口：
+
+```bash
+curl -sS -X POST https://api.osv.dev/v1/querybatch \
+  -H 'Content-Type: application/json' \
+  --data '{"queries":[]}'
+```
+
+若服务器必须通过代理访问外网，请在启动服务的同一用户环境中设置 `HTTPS_PROXY`（必要时设置 `HTTP_PROXY` 和 `NO_PROXY`），然后重启服务：
+
+```bash
+export HTTPS_PROXY=http://proxy.example.com:3128
+./stop.sh
+./start.sh
+```
+
+不要在 `NO_PROXY` 中误加入 `api.osv.dev`。如果命令持续无法连接，应让网络管理员放行 `api.osv.dev:443`，或先确认代理的 TLS 证书链和 DNS 配置。
 
 ### SSH 登录场景（推荐）
 

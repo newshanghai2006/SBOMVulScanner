@@ -49,6 +49,24 @@ def test_osv_batch_failure_is_not_reported_as_clean():
     assert asyncio.run(run())[0].status == "error"
 
 
+def test_osv_batch_retries_transient_connect_timeout():
+    attempts = 0
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            raise httpx.ConnectTimeout("temporary network failure", request=request)
+        return httpx.Response(200, json={"results": [{"vulns": []}]})
+
+    async def run():
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+            return await query_osv_batch(client, [Component(name="demo", version="1", purl="pkg:pypi/demo@1")])
+
+    assert asyncio.run(run())[0].status == "clean"
+    assert attempts == 2
+
+
 def test_fix_version_comes_from_installed_versions_range():
     vuln = {"affected": [{
         "package": {"purl": "pkg:npm/rollup"},

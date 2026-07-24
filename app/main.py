@@ -248,6 +248,8 @@ async def scan(
     results = await scan_components(components, nvd_api_key)
     engines = ["OSV", "NVD"]
     warnings: list[str] = []
+    if any(item.status == "error" and (item.message or "").startswith("OSV query failed") for item in results):
+        warnings.append("OSV 请求在重试后仍不可用；相关组件标记为查询失败，未按干净处理。请检查服务器到 api.osv.dev 的网络、代理或稍后重试。")
     requested_trivy = scan_engine == "hybrid" or (scan_engine == "auto" and trivy.available())
     use_trivy = requested_trivy and trivy.available()
     if use_trivy:
