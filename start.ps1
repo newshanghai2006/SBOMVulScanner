@@ -1,7 +1,8 @@
 param(
     [ValidateRange(1, 65535)]
     [int]$Port = 8088,
-    [string]$HostAddress = "127.0.0.1"
+    [string]$HostAddress = "127.0.0.1",
+    [string]$GitAllowedHosts = $env:SBOM_GIT_ALLOWED_HOSTS
 )
 
 $ErrorActionPreference = "Stop"
@@ -11,6 +12,12 @@ $pidFile = Join-Path $dataDir "server.pid"
 $stateFile = Join-Path $dataDir "server-state.json"
 $stdoutLog = Join-Path $dataDir "server.out.log"
 $stderrLog = Join-Path $dataDir "server.err.log"
+
+if ($GitAllowedHosts) {
+    $env:SBOM_GIT_ALLOWED_HOSTS = $GitAllowedHosts
+} else {
+    Remove-Item Env:SBOM_GIT_ALLOWED_HOSTS -ErrorAction SilentlyContinue
+}
 
 New-Item -ItemType Directory -Path $dataDir -Force | Out-Null
 

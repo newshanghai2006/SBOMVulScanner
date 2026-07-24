@@ -174,6 +174,58 @@ python -m pip install -r requirements.txt
 .\stop.ps1                   # 只关闭 start.ps1 记录的本项目进程
 ```
 
+### Windows 配置 Git 仓库主机白名单
+
+出现 `仓库主机 '10.180.200.18' 未被服务器管理员允许` 时，需要先停止现有服务，再把该主机传给本项目启动脚本：
+
+```powershell
+cd D:\path\to\sbom-scan
+.\stop.ps1
+.\start.ps1 -GitAllowedHosts "10.180.200.18"
+```
+
+多个仓库主机使用英文逗号分隔：
+
+```powershell
+.\stop.ps1
+.\start.ps1 -GitAllowedHosts "10.180.200.18,git.example.com"
+```
+
+`-GitAllowedHosts` 只设置本次启动的 SBOM Scan 子进程，不修改其他用户、其他终端或其他 Python 进程。服务已经运行时必须先执行 `stop.ps1`，否则 `start.ps1` 会保留原进程，新的白名单不会生效。
+
+也可以在当前 PowerShell 窗口中临时设置环境变量。该变量会被随后启动的 SBOM Scan 继承，关闭 PowerShell 后失效：
+
+```powershell
+.\stop.ps1
+$env:SBOM_GIT_ALLOWED_HOSTS = "10.180.200.18"
+.\start.ps1
+```
+
+需要对当前 Windows 用户持久保存时：
+
+```powershell
+[Environment]::SetEnvironmentVariable(
+    "SBOM_GIT_ALLOWED_HOSTS",
+    "10.180.200.18,git.example.com",
+    "User"
+)
+```
+
+设置后关闭并重新打开 PowerShell，再执行 `stop.ps1` 和 `start.ps1`。删除用户级配置：
+
+```powershell
+[Environment]::SetEnvironmentVariable("SBOM_GIT_ALLOWED_HOSTS", $null, "User")
+```
+
+如果需要让其他计算机直接访问 Windows 上的服务，可同时指定监听地址；还需按组织安全策略配置 Windows 防火墙：
+
+```powershell
+.\stop.ps1
+.\start.ps1 -HostAddress "0.0.0.0" -Port 8088 -GitAllowedHosts "10.180.200.18"
+```
+
+白名单只允许服务器连接指定 Git 主机，不等于仓库身份认证。主机允许后，如果 HTTP(S) 私有仓库拒绝匿名访问，页面才会弹出用户名和密码/访问令牌窗口。
+
 也可以按端口强制停止任意 TCP 监听进程：
 
 ```bat
