@@ -27,10 +27,15 @@ def test_frontend_assets_disable_browser_cache():
     client = TestClient(app)
     page = client.get("/")
     script = client.get("/app.js")
+    favicon = client.get("/favicon.svg?v=1")
 
     assert page.headers["cache-control"] == "no-store"
     assert script.headers["cache-control"] == "no-store"
     assert "/app.js?v=2.5.0" in page.text
+    assert '/favicon.svg?v=1' in page.text
+    assert favicon.headers["content-type"].startswith("image/svg+xml")
+    assert '#167454' in favicon.text
+    assert '>SS<' in favicon.text
 
 
 def test_scan_history_is_isolated_by_browser_session(tmp_path, monkeypatch):

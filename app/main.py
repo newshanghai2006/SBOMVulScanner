@@ -38,7 +38,7 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 MAX_FILE_SIZE = 100 * 1024 * 1024
 
 database.initialize()
-app = FastAPI(title="SBOM Scan", version="2.7.0")
+app = FastAPI(title="SBOM Scan", version="2.7.1")
 SESSION_COOKIE = "sbom_scan_session"
 SESSION_PATTERN = re.compile(r"^[A-Za-z0-9_-]{43}$")
 
